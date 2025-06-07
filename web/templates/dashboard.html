@@ -1,0 +1,344 @@
+# web/templates/dashboard.html
+"""
+HTML шаблон дашборда (сохранить в отдельный файл)
+"""
+dashboard_html = """
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto AI Trading Bot Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <div x-data="dashboard()" x-init="init()" class="min-h-screen p-4">
+        <!-- Header -->
+        <header class="mb-8">
+            <div class="flex justify-between items-center">
+                <h1 class="text-3xl font-bold">🤖 Crypto AI Trading Bot</h1>
+                <div class="flex items-center space-x-4">
+                    <span class="px-3 py-1 rounded-full text-sm"
+                          :class="status === 'running' ? 'bg-green-500' : 'bg-red-500'">
+                        <span x-text="status === 'running' ? '● Running' : '● Stopped'"></span>
+                    </span>
+                    <span class="text-sm text-gray-400" x-text="'Uptime: ' + uptime"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Portfolio Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">💰 Portfolio</h2>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Total Value:</span>
+                        <span class="font-mono" x-text="' + totalValue.toFixed(2)"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Available:</span>
+                        <span class="font-mono" x-text="' + availableBalance.toFixed(2)"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Unrealized PnL:</span>
+                        <span class="font-mono"
+                              :class="unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'"
+                              x-text="(unrealizedPnl >= 0 ? '+' : '') + ' + unrealizedPnl.toFixed(2)"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Risk Metrics Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">⚠️ Risk Metrics</h2>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Risk Score:</span>
+                        <div class="w-32 bg-gray-700 rounded-full h-2 mt-2">
+                            <div class="bg-gradient-to-r from-green-400 to-red-400 h-2 rounded-full"
+                                 :style="'width: ' + riskScore + '%'"></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Drawdown:</span>
+                        <span class="font-mono text-red-400" x-text="currentDrawdown.toFixed(2) + '%'"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Daily Loss:</span>
+                        <span class="font-mono" x-text="dailyLoss.toFixed(2) + '%'"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Card -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">📊 Performance</h2>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Win Rate:</span>
+                        <span class="font-mono" x-text="(winRate * 100).toFixed(1) + '%'"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Trades Today:</span>
+                        <span class="font-mono" x-text="tradesToday"></span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">Profit Factor:</span>
+                        <span class="font-mono" x-text="profitFactor.toFixed(2)"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Positions Table -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">📈 Open Positions</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="text-left border-b border-gray-700">
+                        <tr>
+                            <th class="pb-3">Symbol</th>
+                            <th class="pb-3">Side</th>
+                            <th class="pb-3">Entry</th>
+                            <th class="pb-3">Quantity</th>
+                            <th class="pb-3">PnL</th>
+                            <th class="pb-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">
+                        <template x-for="position in positions" :key="position.id">
+                            <tr>
+                                <td class="py-3 font-mono" x-text="position.symbol"></td>
+                                <td class="py-3">
+                                    <span class="px-2 py-1 rounded text-xs"
+                                          :class="position.side === 'long' ? 'bg-green-600' : 'bg-red-600'"
+                                          x-text="position.side.toUpperCase()"></span>
+                                </td>
+                                <td class="py-3 font-mono" x-text="' + position.entry_price.toFixed(2)"></td>
+                                <td class="py-3 font-mono" x-text="position.quantity.toFixed(4)"></td>
+                                <td class="py-3 font-mono"
+                                    :class="position.pnl >= 0 ? 'text-green-400' : 'text-red-400'"
+                                    x-text="(position.pnl >= 0 ? '+' : '') + ' + position.pnl.toFixed(2) + ' (' + position.pnl_percent.toFixed(2) + '%)'"></td>
+                                <td class="py-3">
+                                    <button @click="closePosition(position.id)"
+                                            class="text-red-400 hover:text-red-300">Close</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="positions.length === 0" class="text-center py-8 text-gray-400">
+                    No open positions
+                </div>
+            </div>
+        </div>
+
+        <!-- Strategies -->
+        <div class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">🎯 Active Strategies</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="strategy in strategies" :key="strategy.name">
+                    <div class="bg-gray-700 rounded p-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-semibold" x-text="strategy.name"></h3>
+                            <button @click="toggleStrategy(strategy.name)"
+                                    class="w-12 h-6 rounded-full transition-colors"
+                                    :class="strategy.active ? 'bg-green-500' : 'bg-gray-600'">
+                                <div class="w-5 h-5 bg-white rounded-full transition-transform"
+                                     :class="strategy.active ? 'translate-x-6' : 'translate-x-1'"></div>
+                            </button>
+                        </div>
+                        <div class="text-sm text-gray-400">
+                            <span x-text="strategy.active ? 'Active' : 'Inactive'"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function dashboard() {
+            return {
+                // WebSocket
+                ws: null,
+
+                // Data
+                status: 'connecting',
+                uptime: '0:00:00',
+                totalValue: 0,
+                availableBalance: 0,
+                unrealizedPnl: 0,
+                riskScore: 0,
+                currentDrawdown: 0,
+                dailyLoss: 0,
+                winRate: 0,
+                tradesToday: 0,
+                profitFactor: 0,
+                positions: [],
+                strategies: [],
+
+                init() {
+                    this.connectWebSocket();
+                    this.fetchInitialData();
+
+                    // Периодическое обновление
+                    setInterval(() => this.fetchStatus(), 5000);
+                },
+
+                connectWebSocket() {
+                    const wsUrl = `ws://${window.location.host}/ws`;
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        this.ws.send(JSON.stringify({
+                            type: 'subscribe',
+                            channels: ['portfolio', 'positions', 'risk']
+                        }));
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleWebSocketMessage(message);
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('WebSocket disconnected, reconnecting...');
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+                },
+
+                handleWebSocketMessage(message) {
+                    switch (message.type) {
+                        case 'portfolio_update':
+                            this.totalValue = message.data.total_value;
+                            this.availableBalance = message.data.available_balance;
+                            this.unrealizedPnl = message.data.unrealized_pnl;
+                            break;
+
+                        case 'positions_update':
+                            this.positions = message.data.positions;
+                            break;
+                    }
+                },
+
+                async fetchInitialData() {
+                    await Promise.all([
+                        this.fetchStatus(),
+                        this.fetchPortfolio(),
+                        this.fetchPositions(),
+                        this.fetchStrategies(),
+                        this.fetchRisk(),
+                        this.fetchPerformance()
+                    ]);
+                },
+
+                async fetchStatus() {
+                    try {
+                        const response = await fetch('/api/status');
+                        const data = await response.json();
+                        this.status = data.status;
+                        this.uptime = data.uptime;
+                    } catch (error) {
+                        console.error('Error fetching status:', error);
+                    }
+                },
+
+                async fetchPortfolio() {
+                    try {
+                        const response = await fetch('/api/portfolio');
+                        const data = await response.json();
+                        this.totalValue = data.total_value;
+                        this.availableBalance = data.available_balance;
+                        this.unrealizedPnl = data.unrealized_pnl;
+                    } catch (error) {
+                        console.error('Error fetching portfolio:', error);
+                    }
+                },
+
+                async fetchPositions() {
+                    try {
+                        const response = await fetch('/api/positions');
+                        this.positions = await response.json();
+                    } catch (error) {
+                        console.error('Error fetching positions:', error);
+                    }
+                },
+
+                async fetchStrategies() {
+                    try {
+                        const response = await fetch('/api/strategies');
+                        this.strategies = await response.json();
+                    } catch (error) {
+                        console.error('Error fetching strategies:', error);
+                    }
+                },
+
+                async fetchRisk() {
+                    try {
+                        const response = await fetch('/api/risk');
+                        const data = await response.json();
+                        this.riskScore = data.risk_score;
+                        this.currentDrawdown = data.current_drawdown;
+                        this.dailyLoss = data.daily_loss;
+                    } catch (error) {
+                        console.error('Error fetching risk:', error);
+                    }
+                },
+
+                async fetchPerformance() {
+                    try {
+                        const response = await fetch('/api/performance');
+                        const data = await response.json();
+                        this.winRate = data.win_rate;
+                        this.tradesToday = data.trades_today;
+                        this.profitFactor = data.profit_factor;
+                    } catch (error) {
+                        console.error('Error fetching performance:', error);
+                    }
+                },
+
+                async toggleStrategy(strategyName) {
+                    const strategy = this.strategies.find(s => s.name === strategyName);
+                    if (!strategy) return;
+
+                    try {
+                        await fetch(`/api/strategies/${strategyName}`, {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                name: strategyName,
+                                enabled: !strategy.active,
+                                parameters: strategy.config
+                            })
+                        });
+
+                        strategy.active = !strategy.active;
+                    } catch (error) {
+                        console.error('Error toggling strategy:', error);
+                    }
+                },
+
+                async closePosition(positionId) {
+                    if (!confirm('Are you sure you want to close this position?')) return;
+
+                    try {
+                        // Здесь должен быть API call для закрытия позиции
+                        console.log('Closing position:', positionId);
+                    } catch (error) {
+                        console.error('Error closing position:', error);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+"""
