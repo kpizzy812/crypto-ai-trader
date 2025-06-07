@@ -1,0 +1,52 @@
+# docker/docker-compose.yml
+version: '3.8'
+
+services:
+  crypto-trader:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: crypto-ai-trader
+    restart: unless-stopped
+    volumes:
+      - ../logs:/app/logs
+      - ../.env:/app/.env
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - crypto-trader-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-trader-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - crypto-trader-net
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: crypto-trader-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crypto_trader
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: secure_password_here
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crypto-trader-net
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  crypto-trader-net:
+    driver: bridge
