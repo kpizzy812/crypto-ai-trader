@@ -5,7 +5,7 @@
 from typing import Dict, Optional
 from decimal import Decimal
 from loguru import logger
-
+import pandas as pd
 
 from core.event_bus import EventBus, Event, EventType
 from risk.risk_manager import RiskManager
