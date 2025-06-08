@@ -15,7 +15,7 @@ from risk.risk_manager import RiskManager
 
 from .exchange_manager import ExchangeManager
 from .market_analyzer import MarketAnalyzer
-from .signal_processor import SignalProcessor
+from .signal_processor import EnhancedSignalProcessor
 from .position_manager import PositionManager
 from .strategy_manager import StrategyManager
 from .notification_manager import NotificationManager
@@ -37,7 +37,7 @@ class TradingEngine:
         # Специализированные менеджеры
         self.exchange_manager = ExchangeManager(settings, self.event_bus)
         self.market_analyzer = MarketAnalyzer(trading_config, self.event_bus)
-        self.signal_processor = SignalProcessor(self.event_bus, self.risk_manager)
+        self.signal_processor = EnhancedSignalProcessor(self.event_bus, self.risk_manager)
         self.position_manager = PositionManager(self.portfolio, self.event_bus)
         self.strategy_manager = StrategyManager(trading_config, self.event_bus)
         self.notification_manager = NotificationManager(settings, self.event_bus)
