@@ -1,23 +1,25 @@
-# main.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# main.py - PRODUCTION READY VERSION
 """
-Главная точка входа с тестированием реальных данных
+Главная точка входа - готовая к продакшену версия
 """
 import asyncio
 import uvicorn
+import argparse
+import sys
+import traceback
+from pathlib import Path
 from loguru import logger
+
 from config.settings import Settings
 from config.trading_config import TradingConfig
 from utils.logger import setup_logger
-import sys
-import traceback
-import pandas as pd
 
 
-async def run_real_data_test():
-    """Тестирование с реальными данными с бирж"""
-    setup_logger("INFO", "logs/real_test.log")
+async def run_real_trading():
+    """Запуск реальной торговли в testnet"""
+    setup_logger("INFO", "logs/real_trading.log")
 
-    logger.info("🌐 === ТЕСТИРОВАНИЕ С РЕАЛЬНЫМИ ДАННЫМИ ===")
+    logger.info("🤖 === ЗАПУСК РЕАЛЬНОЙ ТОРГОВЛИ (TESTNET) ===")
 
     settings = Settings()
     trading_config = TradingConfig()
@@ -26,62 +28,193 @@ async def run_real_data_test():
     settings.bybit_testnet = True
     settings.binance_testnet = True
 
+    # Проверка обязательных настроек
+    if not _validate_settings(settings):
+        logger.error("❌ Некорректные настройки. Проверьте .env файл")
+        return False
+
     try:
         from core.engine.trading_engine import TradingEngine
 
-        logger.info("🔧 Инициализация торгового движка...")
+        logger.info("🚀 Инициализация торгового движка...")
         engine = TradingEngine(settings, trading_config)
 
-        # Инициализация (но не запуск торгового цикла)
+        # Инициализация и проверка подключений
         await engine.initialize()
 
-        logger.info(f"🔌 Подключенные биржи: {await engine.exchange_manager.get_connected_exchanges()}")
+        # Проверка подключений к биржам
+        exchanges = await engine.exchange_manager.get_connected_exchanges()
+        if not exchanges:
+            logger.error("❌ Нет подключений к биржам. Проверьте API ключи")
+            return False
 
-        # Тестируем несколько пар
-        test_symbols = ["BTCUSDT", "ETHUSDT"]
-        results = {}
+        logger.info(f"✅ Подключены биржи: {exchanges}")
 
-        for symbol in test_symbols:
-            logger.info(f"📊 Тестирование {symbol}...")
-            result = await engine.test_real_analysis(symbol)
-
-            if result:
-                results[symbol] = result
-                logger.info(f"✅ {symbol} анализ завершен:")
-                logger.info(f"   📈 Цена: ${result['current_price']:,.2f}")
-                logger.info(f"   📊 Изменение: {result['price_change_24h']:+.2f}%")
-                logger.info(f"   🤖 Рекомендация: {result['analysis']['action']}")
-                logger.info(f"   💪 Уверенность: {result['analysis']['confidence']:.1%}")
+        # Проверка балансов
+        balance_summary = await engine.exchange_manager.get_balance_summary()
+        for exchange, info in balance_summary.items():
+            if info['connected']:
+                logger.info(f"💰 {exchange}: {info['total_assets']} активов")
             else:
-                logger.warning(f"⚠️ Не удалось проанализировать {symbol}")
+                logger.warning(f"⚠️ {exchange}: не подключен - {info.get('error', 'unknown')}")
 
-        # Дополнительное тестирование торгового цикла
-        logger.info("🔄 Тестирование торгового цикла...")
+        # Тест получения реальных данных
+        logger.info("📡 Тестирование получения рыночных данных...")
+        test_data = await engine.exchange_manager.get_market_data("BTCUSDT", "5m", 10)
+        if not test_data.empty:
+            current_price = test_data['close'].iloc[-1]
+            logger.info(f"✅ BTC/USDT: ${current_price:,.2f}")
+        else:
+            logger.warning("⚠️ Не удалось получить рыночные данные")
 
-        # Запуск одного цикла анализа
-        for trading_pair in trading_config.trading_pairs[:3]:  # Только первые 3
-            if trading_pair.enabled:
-                await engine.market_analyzer.analyze_symbol(trading_pair.symbol)
+        # Запуск торгового цикла
+        logger.info("🎯 Запуск торгового цикла...")
+        logger.warning("⚠️ ВНИМАНИЕ: Торговля в TESTNET режиме")
 
-        logger.info("🎉 Тестирование с реальными данными завершено!")
+        await engine.start()
 
-        # Корректная остановка
-        await engine.stop()
+    except KeyboardInterrupt:
+        logger.info("⏹️ Остановка по запросу пользователя")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False
 
-        return results
+
+async def run_comprehensive_test():
+    """Комплексное тестирование всех систем"""
+    setup_logger("DEBUG", "logs/comprehensive_test.log")
+
+    logger.info("🧪 === КОМПЛЕКСНОЕ ТЕСТИРОВАНИЕ СИСТЕМ ===")
+
+    settings = Settings()
+    trading_config = TradingConfig()
+
+    # Принудительно testnet
+    settings.bybit_testnet = True
+    settings.binance_testnet = True
+
+    test_results = {
+        'exchange_connections': False,
+        'market_data': False,
+        'ai_analysis': False,
+        'strategies': False,
+        'risk_management': False,
+        'backtesting': False
+    }
+
+    try:
+        # 1. Тест подключений к биржам
+        logger.info("🔌 === ТЕСТ ПОДКЛЮЧЕНИЙ К БИРЖАМ ===")
+        test_results['exchange_connections'] = await _test_exchange_connections(settings)
+
+        # 2. Тест получения рыночных данных
+        logger.info("📡 === ТЕСТ ПОЛУЧЕНИЯ ДАННЫХ ===")
+        test_results['market_data'] = await _test_market_data(settings)
+
+        # 3. Тест AI анализа
+        logger.info("🤖 === ТЕСТ AI АНАЛИЗА ===")
+        test_results['ai_analysis'] = await _test_ai_analysis()
+
+        # 4. Тест стратегий
+        logger.info("🎯 === ТЕСТ СТРАТЕГИЙ ===")
+        test_results['strategies'] = await _test_strategies(trading_config)
+
+        # 5. Тест риск-менеджмента
+        logger.info("⚠️ === ТЕСТ РИСК-МЕНЕДЖМЕНТА ===")
+        test_results['risk_management'] = await _test_risk_management(trading_config)
+
+        # 6. Тест бэктестинга
+        logger.info("📊 === ТЕСТ БЭКТЕСТИНГА ===")
+        test_results['backtesting'] = await _test_backtesting()
+
+        # Итоговый отчет
+        logger.info("\n🎉 === ИТОГОВЫЙ ОТЧЕТ ===")
+        total_tests = len(test_results)
+        passed_tests = sum(test_results.values())
+
+        for test_name, result in test_results.items():
+            status = "✅ ПРОЙДЕН" if result else "❌ НЕ ПРОЙДЕН"
+            logger.info(f"   {test_name}: {status}")
+
+        logger.info(f"\n📊 Результат: {passed_tests}/{total_tests} тестов пройдено")
+
+        if passed_tests == total_tests:
+            logger.info("🎉 ВСЕ ТЕСТЫ ПРОЙДЕНЫ! Система готова к торговле")
+            return True
+        else:
+            logger.warning(f"⚠️ {total_tests - passed_tests} тестов не пройдено")
+            return False
 
     except Exception as e:
-        logger.error(f"❌ Ошибка в тестировании: {e}")
+        logger.error(f"❌ Критическая ошибка тестирования: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return None
+        return False
 
 
-async def run_demo_mode():
-    """Демо режим с улучшенной обработкой ошибок"""
-    setup_logger("INFO", "logs/demo.log")
+async def run_integrated_backtest():
+    """Запуск интегрированного бэктестинга"""
+    setup_logger("INFO", "logs/integrated_backtest.log")
 
-    logger.info("🎯 ДЕМО режим - Модульная архитектура")
-    logger.info("🧩 Тестирование компонентов по отдельности")
+    logger.info("📊 === ЗАПУСК ИНТЕГРИРОВАННОГО БЭКТЕСТИНГА ===")
+
+    try:
+        from scripts.integrated_backtest import run_integrated_backtest as run_backtest
+        await run_backtest()
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка бэктестинга: {e}")
+        return False
+
+
+async def run_api_server():
+    """Запуск API сервера"""
+    setup_logger("INFO", "logs/api_server.log")
+
+    logger.info("🌐 === ЗАПУСК API СЕРВЕРА ===")
+
+    try:
+        from api.main import app
+
+        # Настройка и запуск сервера
+        config = uvicorn.Config(
+            app=app,
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            access_log=True
+        )
+
+        server = uvicorn.Server(config)
+
+        logger.info("🚀 API сервер запущен на http://localhost:8000")
+        logger.info("📊 Dashboard доступен по адресу: http://localhost:8000")
+
+        await server.serve()
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска API сервера: {e}")
+        return False
+
+
+async def run_position_live_test():
+    """Тестирование открытия реальной позиции с минимальной суммой"""
+    setup_logger("INFO", "logs/live_position_test.log")
+
+    logger.info("💰 === ТЕСТ РЕАЛЬНОЙ ПОЗИЦИИ (МИНИМАЛЬНАЯ СУММА) ===")
+    logger.warning("⚠️ ВНИМАНИЕ: Будет открыта реальная позиция в testnet!")
+
+    # Подтверждение от пользователя
+    try:
+        confirmation = input("Продолжить? (yes/no): ").lower()
+        if confirmation != 'yes':
+            logger.info("❌ Тест отменен пользователем")
+            return False
+    except KeyboardInterrupt:
+        logger.info("❌ Тест прерван")
+        return False
 
     settings = Settings()
     trading_config = TradingConfig()
@@ -91,181 +224,133 @@ async def run_demo_mode():
     settings.binance_testnet = True
 
     try:
-        logger.info("📊 === НАЧАЛО ДЕМО ТЕСТИРОВАНИЯ ===")
+        from core.engine.trading_engine import TradingEngine
 
-        # 1. Тест базовых импортов
-        logger.info("🔍 Тестирование базовых импортов...")
-        await test_imports()
+        engine = TradingEngine(settings, trading_config)
+        await engine.initialize()
 
-        # 2. Тест создания тестовых данных
-        logger.info("📈 Тестирование генерации данных...")
-        await test_data_generation()
+        exchanges = await engine.exchange_manager.get_connected_exchanges()
+        if not exchanges:
+            logger.error("❌ Нет подключений к биржам")
+            return False
 
-        # 3. Тест технических индикаторов
-        logger.info("⚙️ Тестирование технических индикаторов...")
-        await test_technical_indicators()
+        # Получаем баланс
+        balance_summary = await engine.exchange_manager.get_balance_summary()
+        exchange_name = exchanges[0]
+        exchange_balance = balance_summary[exchange_name]
 
-        # 4. Тест AI анализатора (mock)
-        logger.info("🤖 Тестирование AI анализатора...")
-        await test_ai_analyzer()
+        if not exchange_balance['connected']:
+            logger.error(f"❌ {exchange_name} не подключен")
+            return False
 
-        # 5. Тест стратегий
-        logger.info("🎯 Тестирование стратегий...")
-        await test_strategies()
+        # Проверяем наличие USDT
+        usdt_balance = 0
+        for asset, data in exchange_balance['balances'].items():
+            if asset == 'USDT':
+                usdt_balance = float(data['free'])
+                break
 
-        logger.info("🎉 Все базовые компоненты работают корректно!")
-        logger.info("ℹ️ Для полного тестирования добавьте API ключи в .env")
+        logger.info(f"💰 Доступно USDT: ${usdt_balance:.2f}")
 
-    except Exception as e:
-        logger.error(f"❌ Ошибка в демо: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        if usdt_balance < 10:
+            logger.error("❌ Недостаточно USDT для теста (минимум $10)")
+            logger.info("💡 Получите тестовые средства на testnet")
+            return False
 
+        # Получаем текущую цену
+        market_data = await engine.exchange_manager.get_market_data("BTCUSDT", "5m", 1)
+        if market_data.empty:
+            logger.error("❌ Не удалось получить цену BTC")
+            return False
 
-async def test_imports():
-    """Тест базовых импортов"""
-    try:
-        from config import Settings, TradingConfig
-        from utils.helpers import create_sample_data
-        from ai.mock_analyzer import MockAIAnalyzer
-        from data.processors.technical_processor import TechnicalProcessor
-        from trading.strategies.simple_momentum import SimpleMomentumStrategy
-        logger.info("✅ Все базовые импорты успешны")
-    except Exception as e:
-        logger.error(f"❌ Ошибка импорта: {e}")
-        raise
+        current_price = float(market_data['close'].iloc[-1])
+        logger.info(f"📈 Текущая цена BTC/USDT: ${current_price:,.2f}")
 
+        # Рассчитываем минимальное количество (примерно $5)
+        test_amount = 5.0  # $5
+        quantity = test_amount / current_price
 
-async def test_data_generation():
-    """Тест генерации тестовых данных"""
-    try:
-        from utils.helpers import create_sample_data
+        # Округляем до минимального размера лота
+        quantity = round(quantity, 6)  # Обычно минимум 0.000001 BTC
 
-        # Создаем тестовые данные
-        data = create_sample_data("BTCUSDT", periods=50)
+        logger.info(f"📊 Планируемая позиция: {quantity} BTC (~${test_amount:.2f})")
 
-        if not data.empty and len(data) > 0:
-            logger.info(f"✅ Сгенерировано {len(data)} свечей тестовых данных")
-            logger.info(f"Ценовой диапазон: ${data['low'].min():.2f} - ${data['high'].max():.2f}")
-        else:
-            raise ValueError("Пустые данные")
+        # Размещаем тестовый ордер
+        logger.info("📝 Размещение тестового ордера...")
 
-    except Exception as e:
-        logger.error(f"❌ Ошибка генерации данных: {e}")
-        raise
+        try:
+            order_result = await engine.exchange_manager.place_order(
+                symbol="BTCUSDT",
+                side="buy",
+                order_type="market",
+                quantity=quantity,
+                strategy="live_test"
+            )
 
+            if order_result:
+                logger.info(f"✅ Ордер размещен: {order_result.order.id}")
+                logger.info(f"📊 Статус: {order_result.order.status}")
 
-async def test_technical_indicators():
-    """Тест технических индикаторов"""
-    try:
-        from data.processors.technical_processor import TechnicalProcessor
-        from utils.helpers import create_sample_data
+                # Ждем немного и проверяем статус
+                await asyncio.sleep(5)
 
-        processor = TechnicalProcessor()
-        data = create_sample_data("BTCUSDT", periods=50)
+                # Получаем обновленную информацию об ордере
+                updated_order = await engine.exchanges[exchange_name].get_order(
+                    order_result.order.id,
+                    "BTCUSDT"
+                )
 
-        # Тестируем основные индикаторы
-        config = {
-            'rsi': {'period': 14},
-            'ema_fast': {'period': 9},
-            'ema_slow': {'period': 21},
-            'volume_sma': {'period': 20}
-        }
+                if updated_order:
+                    logger.info(f"📊 Финальный статус: {updated_order.status}")
 
-        processed = processor.process_ohlcv(data, config)
+                    if updated_order.status == 'filled':
+                        logger.info("🎉 ТЕСТОВАЯ ПОЗИЦИЯ УСПЕШНО ОТКРЫТА!")
+                        logger.info(f"💰 Исполнено по цене: ${updated_order.price}")
 
-        if 'rsi' in processed.columns:
-            logger.info(f"✅ RSI рассчитан. Последнее значение: {processed['rsi'].iloc[-1]:.2f}")
+                        # Сразу же закрываем позицию
+                        logger.info("🔄 Закрытие тестовой позиции...")
 
-        if 'ema_fast' in processed.columns and 'ema_slow' in processed.columns:
-            logger.info(
-                f"✅ EMA рассчитаны. Fast: {processed['ema_fast'].iloc[-1]:.2f}, Slow: {processed['ema_slow'].iloc[-1]:.2f}")
+                        close_order = await engine.exchange_manager.place_order(
+                            symbol="BTCUSDT",
+                            side="sell",
+                            order_type="market",
+                            quantity=quantity,
+                            strategy="live_test_close"
+                        )
 
-    except Exception as e:
-        logger.error(f"❌ Ошибка технических индикаторов: {e}")
-        raise
+                        if close_order:
+                            logger.info("✅ Позиция закрыта")
+                            logger.info("🎉 ТЕСТ РЕАЛЬНОЙ ТОРГОВЛИ УСПЕШНО ЗАВЕРШЕН!")
+                            return True
+                        else:
+                            logger.warning("⚠️ Не удалось автоматически закрыть позицию")
+                            logger.warning("💡 Закройте позицию вручную через интерфейс биржи")
+                    else:
+                        logger.warning(f"⚠️ Ордер не исполнен: {updated_order.status}")
+                else:
+                    logger.warning("⚠️ Не удалось получить статус ордера")
+            else:
+                logger.error("❌ Не удалось разместить ордер")
+                return False
 
-
-async def test_ai_analyzer():
-    """Тест AI анализатора"""
-    try:
-        from ai.mock_analyzer import MockAIAnalyzer
-        from utils.helpers import create_sample_data
-
-        analyzer = MockAIAnalyzer()
-        data = create_sample_data("BTCUSDT", periods=50)
-
-        analysis = await analyzer.analyze_market(data, "BTCUSDT")
-
-        logger.info(f"✅ AI анализ завершен:")
-        logger.info(f"   Действие: {analysis.get('action', 'N/A')}")
-        logger.info(f"   Уверенность: {analysis.get('confidence', 0):.1%}")
-        logger.info(f"   Обоснование: {analysis.get('reasoning', 'N/A')}")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка AI анализатора: {e}")
-        raise
-
-
-async def test_strategies():
-    """Тест торговых стратегий"""
-    try:
-        from trading.strategies.simple_momentum import SimpleMomentumStrategy
-        from utils.helpers import create_sample_data
-
-        config = {
-            'indicators': {
-                'rsi': {'period': 14},
-                'ema_fast': {'period': 9},
-                'ema_slow': {'period': 21},
-                'volume_sma': {'period': 20}
-            }
-        }
-
-        strategy = SimpleMomentumStrategy(config)
-        data = create_sample_data("BTCUSDT", periods=50)
-
-        analysis = await strategy.analyze(data, "BTCUSDT")
-
-        logger.info(f"✅ Стратегия SimpleMomentum протестирована:")
-        logger.info(f"   Рекомендация: {analysis.get('recommendation', 'N/A')}")
-        logger.info(f"   Моментум скор: {analysis.get('momentum_score', 0):.2f}")
-        logger.info(f"   Уверенность: {analysis.get('confidence', 0):.1%}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка размещения ордера: {e}")
+            return False
 
     except Exception as e:
-        logger.error(f"❌ Ошибка тестирования стратегий: {e}")
-        raise
+        logger.error(f"❌ Критическая ошибка теста: {e}")
+        return False
+
+    finally:
+        try:
+            await engine.stop()
+        except:
+            pass
 
 
-async def run_component_test(component: str = None):
-    """Тестирование отдельных компонентов с улучшенной обработкой"""
-    setup_logger("DEBUG", "logs/component_test.log")
-
-    settings = Settings()
-    trading_config = TradingConfig()
-
-    logger.info(f"🧪 Тестирование компонента: {component or 'all'}")
-
-    try:
-        if component == 'exchanges' or not component:
-            await test_exchange_manager(settings)
-
-        if component == 'analyzer' or not component:
-            await test_market_analyzer(trading_config)
-
-        if component == 'strategies' or not component:
-            await test_strategy_manager(trading_config)
-
-        logger.info("✅ Все тесты компонентов завершены")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка тестирования компонентов: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-
-
-async def test_exchange_manager(settings: Settings):
-    """Тест Exchange Manager с улучшенной обработкой"""
-    logger.info("🔌 === ТЕСТ EXCHANGE MANAGER ===")
-
+# Вспомогательные функции для тестирования
+async def _test_exchange_connections(settings: Settings) -> bool:
+    """Тест подключений к биржам"""
     try:
         from core.event_bus import EventBus
         from core.engine.exchange_manager import ExchangeManager
@@ -274,182 +359,285 @@ async def test_exchange_manager(settings: Settings):
         await event_bus.start()
 
         exchange_manager = ExchangeManager(settings, event_bus)
+        await exchange_manager.initialize()
 
-        try:
-            # Попытка инициализации (может упасть из-за API ключей)
-            await exchange_manager.initialize()
+        exchanges = await exchange_manager.get_connected_exchanges()
+        connection_status = await exchange_manager.get_connection_status()
 
-            exchanges = await exchange_manager.get_connected_exchanges()
-            logger.info(f"✅ Подключенные биржи: {exchanges}")
+        logger.info(f"📊 Подключенные биржи: {exchanges}")
+        logger.info(f"📊 Статус подключений: {connection_status}")
 
-            if exchanges:
-                # Тестируем получение данных только если есть подключения
-                data = await exchange_manager.get_market_data("BTCUSDT", "5m", 10)
-                logger.info(f"✅ Получено {len(data)} свечей для BTCUSDT")
+        # Тест подключений
+        test_results = await exchange_manager.test_all_connections()
+
+        for exchange, status in test_results.items():
+            if status:
+                logger.info(f"✅ {exchange}: подключение работает")
             else:
-                logger.warning("⚠️ Нет подключенных бирж (проверьте API ключи в .env)")
+                logger.warning(f"⚠️ {exchange}: проблемы с подключением")
 
-        except Exception as inner_e:
-            logger.warning(f"⚠️ Ошибка подключения к биржам: {inner_e}")
-            logger.info("ℹ️ Это нормально если API ключи не настроены")
+        await exchange_manager.stop()
+        await event_bus.stop()
 
-        finally:
-            await exchange_manager.stop()
-            await event_bus.stop()
+        return len(exchanges) > 0
 
-    except ImportError as e:
-        logger.error(f"❌ Ошибка импорта модулей exchange_manager: {e}")
-        logger.info("ℹ️ Убедитесь что все файлы созданы из артефактов")
     except Exception as e:
-        logger.error(f"❌ Неожиданная ошибка в test_exchange_manager: {e}")
+        logger.error(f"❌ Ошибка теста подключений: {e}")
+        return False
 
 
-async def test_market_analyzer(trading_config: TradingConfig):
-    """Тест Market Analyzer"""
-    logger.info("📊 === ТЕСТ MARKET ANALYZER ===")
-
+async def _test_market_data(settings: Settings) -> bool:
+    """Тест получения рыночных данных"""
     try:
         from core.event_bus import EventBus
-        from core.engine.market_analyzer import MarketAnalyzer
+        from core.engine.exchange_manager import ExchangeManager
 
         event_bus = EventBus()
         await event_bus.start()
 
-        analyzer = MarketAnalyzer(trading_config, event_bus)
+        exchange_manager = ExchangeManager(settings, event_bus)
+        await exchange_manager.initialize()
 
-        try:
-            await analyzer.initialize()
-            await analyzer.analyze_symbol("BTCUSDT")
+        # Тестируем получение данных для разных символов
+        test_symbols = ["BTCUSDT", "ETHUSDT"]
+        success_count = 0
 
-            # Проверка кэша
-            cached = analyzer.get_cached_analysis("BTCUSDT")
-            if cached:
-                logger.info(f"✅ Анализ кэширован: {cached['ai_analysis']['action']}")
+        for symbol in test_symbols:
+            try:
+                data = await exchange_manager.get_market_data(symbol, "5m", 10)
+                if not data.empty and len(data) > 0:
+                    current_price = data['close'].iloc[-1]
+                    logger.info(f"✅ {symbol}: ${current_price:,.2f} ({len(data)} свечей)")
+                    success_count += 1
+                else:
+                    logger.warning(f"⚠️ {symbol}: пустые данные")
+            except Exception as e:
+                logger.warning(f"⚠️ {symbol}: ошибка - {e}")
 
-        finally:
-            await analyzer.stop()
-            await event_bus.stop()
+        await exchange_manager.stop()
+        await event_bus.stop()
 
-    except ImportError as e:
-        logger.error(f"❌ Ошибка импорта market_analyzer: {e}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка в test_market_analyzer: {e}")
-
-
-async def test_strategy_manager(trading_config: TradingConfig):
-    """Тест Strategy Manager"""
-    logger.info("🎯 === ТЕСТ STRATEGY MANAGER ===")
-
-    try:
-        from core.event_bus import EventBus
-        from core.engine.strategy_manager import StrategyManager
-
-        event_bus = EventBus()
-        await event_bus.start()
-
-        strategy_manager = StrategyManager(trading_config, event_bus)
-
-        try:
-            await strategy_manager.initialize()
-
-            strategies = await strategy_manager.get_active_strategies()
-            logger.info(f"✅ Активных стратегий: {len(strategies)}")
-
-            # Тест переключения стратегии
-            if strategies:
-                result = await strategy_manager.toggle_strategy(strategies[0], False)
-                logger.info(f"✅ Стратегия переключена: {result}")
-
-        finally:
-            await strategy_manager.stop()
-            await event_bus.stop()
-
-    except ImportError as e:
-        logger.error(f"❌ Ошибка импорта strategy_manager: {e}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка в test_strategy_manager: {e}")
-
-
-async def run_bot_mode():
-    """Запуск полноценного торгового бота"""
-    setup_logger("INFO", "logs/bot.log")
-
-    logger.info("🤖 === ЗАПУСК ТОРГОВОГО БОТА ===")
-
-    settings = Settings()
-    trading_config = TradingConfig()
-
-    try:
-        from core.engine.trading_engine import TradingEngine
-
-        engine = TradingEngine(settings, trading_config)
-
-        # Запуск торгового цикла
-        await engine.start()
+        return success_count > 0
 
     except Exception as e:
-        logger.error(f"❌ Ошибка запуска бота: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Ошибка теста данных: {e}")
+        return False
 
 
-async def run_api_mode():
-    """Запуск API сервера"""
-    setup_logger("INFO", "logs/api.log")
-
-    logger.info("🌐 === ЗАПУСК API СЕРВЕРА ===")
-
+async def _test_ai_analysis() -> bool:
+    """Тест AI анализа"""
     try:
-        from api.main import app
+        from ai.mock_analyzer import MockAIAnalyzer
+        from utils.helpers import create_sample_data
 
-        config = uvicorn.Config(
-            app=app,
-            host="0.0.0.0",
-            port=8000,
-            log_level="info"
+        analyzer = MockAIAnalyzer()
+        test_data = create_sample_data("BTCUSDT", periods=50)
+
+        analysis = await analyzer.analyze_market(test_data, "BTCUSDT")
+
+        required_fields = ['action', 'confidence', 'reasoning']
+        if all(field in analysis for field in required_fields):
+            logger.info(f"✅ AI анализ: {analysis['action']} (уверенность: {analysis['confidence']:.1%})")
+            return True
+        else:
+            logger.error(f"❌ AI анализ: отсутствуют поля {required_fields}")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка теста AI: {e}")
+        return False
+
+
+async def _test_strategies(trading_config: TradingConfig) -> bool:
+    """Тест торговых стратегий"""
+    try:
+        from trading.strategies.simple_momentum import SimpleMomentumStrategy
+        from utils.helpers import create_sample_data
+
+        # Тест SimpleMomentum
+        config = {
+            'indicators': trading_config.technical_indicators,
+            'position_size_percent': 2.0
+        }
+
+        strategy = SimpleMomentumStrategy(config)
+        test_data = create_sample_data("BTCUSDT", periods=100)
+
+        analysis = await strategy.analyze(test_data, "BTCUSDT")
+
+        if 'recommendation' in analysis:
+            logger.info(
+                f"✅ SimpleMomentum: {analysis['recommendation']} (уверенность: {analysis.get('confidence', 0):.1%})")
+            return True
+        else:
+            logger.error("❌ SimpleMomentum: нет рекомендации")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка теста стратегий: {e}")
+        return False
+
+
+async def _test_risk_management(trading_config: TradingConfig) -> bool:
+    """Тест риск-менеджмента"""
+    try:
+        from risk.risk_manager import RiskManager
+        from core.portfolio import Portfolio
+        from decimal import Decimal
+
+        portfolio = Portfolio(Decimal("10000"))
+        risk_manager = RiskManager(trading_config.risk, portfolio)
+
+        # Тест проверки риска позиции
+        risk_ok = await risk_manager.check_position_risk(
+            symbol="BTCUSDT",
+            side="buy",
+            entry_price=Decimal("45000"),
+            quantity=Decimal("0.002")  # ~$90
         )
 
-        server = uvicorn.Server(config)
-        await server.serve()
+        # Тест расчета метрик
+        metrics = await risk_manager.get_risk_metrics()
+
+        if hasattr(metrics, 'risk_score') and 0 <= metrics.risk_score <= 100:
+            logger.info(f"✅ Risk Manager: риск-скор {metrics.risk_score}/100")
+            logger.info(f"✅ Проверка позиции: {'разрешена' if risk_ok else 'запрещена'}")
+            return True
+        else:
+            logger.error("❌ Risk Manager: некорректные метрики")
+            return False
 
     except Exception as e:
-        logger.error(f"❌ Ошибка запуска API: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Ошибка теста риск-менеджмента: {e}")
+        return False
+
+
+async def _test_backtesting() -> bool:
+    """Тест системы бэктестинга"""
+    try:
+        from backtest.backtester import Backtester
+        from trading.strategies.simple_momentum import SimpleMomentumStrategy
+        from utils.helpers import create_sample_data
+
+        backtester = Backtester(initial_capital=10000)
+
+        strategy_config = {
+            'indicators': {
+                'rsi': {'period': 14},
+                'ema_fast': {'period': 9},
+                'ema_slow': {'period': 21}
+            }
+        }
+
+        strategy = SimpleMomentumStrategy(strategy_config)
+        test_data = {"BTCUSDT": create_sample_data("BTCUSDT", periods=200)}
+
+        result = await backtester.run(strategy, test_data)
+
+        if result and hasattr(result, 'total_return_percent'):
+            logger.info(f"✅ Бэктест: доходность {result.total_return_percent:.2f}%, сделок {result.total_trades}")
+            return True
+        else:
+            logger.error("❌ Бэктест: некорректный результат")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка теста бэктестинга: {e}")
+        return False
+
+
+def _validate_settings(settings: Settings) -> bool:
+    """Валидация настроек"""
+    issues = []
+
+    # Проверка API ключей (хотя бы одна биржа)
+    if not ((settings.bybit_api_key and settings.bybit_api_secret) or
+            (settings.binance_api_key and settings.binance_api_secret)):
+        issues.append("Не настроены API ключи ни для одной биржи")
+
+    # Проверка testnet режима
+    if not settings.bybit_testnet and settings.bybit_api_key:
+        issues.append("⚠️ ВНИМАНИЕ: Bybit не в testnet режиме!")
+
+    if not settings.binance_testnet and settings.binance_api_key:
+        issues.append("⚠️ ВНИМАНИЕ: Binance не в testnet режиме!")
+
+    if issues:
+        for issue in issues:
+            logger.error(f"❌ {issue}")
+        return False
+
+    return True
 
 
 async def main():
-    """Главная функция с улучшенной обработкой ошибок"""
-    import argparse
+    """Главная функция"""
+    parser = argparse.ArgumentParser(description='Crypto AI Trading Bot - Production Ready')
+    parser.add_argument('--mode',
+                        choices=['trading', 'test', 'backtest', 'api', 'both', 'live-test'],
+                        default='test',
+                        help='Режим запуска')
+    parser.add_argument('--symbols',
+                        default='BTCUSDT,ETHUSDT',
+                        help='Торговые пары через запятую')
+    parser.add_argument('--force-mainnet',
+                        action='store_true',
+                        help='ОПАСНО: Принудительно использовать mainnet')
 
-    parser = argparse.ArgumentParser(description='Crypto AI Trading Bot v2.2 (Real Data)')
-    parser.add_argument('--mode', choices=['bot', 'api', 'both', 'demo', 'test', 'real-test'],
-                        default='demo', help='Режим запуска')
-    parser.add_argument('--component', choices=['exchanges', 'analyzer', 'strategies'],
-                        help='Тест отдельного компонента')
     args = parser.parse_args()
 
-    try:
-        if args.mode == 'demo':
-            await run_demo_mode()
-        elif args.mode == 'test':
-            await run_component_test(args.component)
-        elif args.mode == 'real-test':
-            await run_real_data_test()
-        elif args.mode == 'bot':
-            await run_bot_mode()
-        elif args.mode == 'api':
-            await run_api_mode()
-        elif args.mode == 'both':
-            # Запуск в параллельных задачах
-            bot_task = asyncio.create_task(run_bot_mode())
-            api_task = asyncio.create_task(run_api_mode())
+    # Проверка безопасности
+    if args.force_mainnet:
+        logger.critical("⚠️ ВНИМАНИЕ: Запрос использования MAINNET!")
+        try:
+            confirmation = input("Вы уверены? Введите 'YES' для подтверждения: ")
+            if confirmation != 'YES':
+                logger.info("❌ Запуск отменен")
+                return
+        except KeyboardInterrupt:
+            logger.info("❌ Запуск прерван")
+            return
 
-            await asyncio.gather(bot_task, api_task)
+    try:
+        if args.mode == 'test':
+            success = await run_comprehensive_test()
+            sys.exit(0 if success else 1)
+
+        elif args.mode == 'trading':
+            success = await run_real_trading()
+            sys.exit(0 if success else 1)
+
+        elif args.mode == 'backtest':
+            success = await run_integrated_backtest()
+            sys.exit(0 if success else 1)
+
+        elif args.mode == 'api':
+            await run_api_server()
+
+        elif args.mode == 'live-test':
+            success = await run_position_live_test()
+            sys.exit(0 if success else 1)
+
+        elif args.mode == 'both':
+            # Запуск торговли и API параллельно
+            trading_task = asyncio.create_task(run_real_trading())
+            api_task = asyncio.create_task(run_api_server())
+
+            done, pending = await asyncio.wait(
+                [trading_task, api_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Отменяем оставшиеся задачи
+            for task in pending:
+                task.cancel()
+
         else:
-            logger.info(f"Режим {args.mode} будет реализован после исправления ошибок")
-            logger.info("Сначала запустите: python main.py --mode demo")
+            logger.error(f"❌ Неизвестный режим: {args.mode}")
+            sys.exit(1)
 
     except KeyboardInterrupt:
-        logger.info("⏹️ Остановлено пользователем")
+        logger.info("👋 Остановлено пользователем")
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -460,7 +648,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Программа остановлена пользователем")
+        logger.info("👋 Программа остановлена")
     except Exception as e:
         logger.error(f"💥 Фатальная ошибка: {e}")
         sys.exit(1)
