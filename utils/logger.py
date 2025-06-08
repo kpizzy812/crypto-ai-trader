@@ -5,6 +5,7 @@ import sys
 
 def setup_logger(level: str = "INFO", log_file: str = None):
     """Настройка логирования"""
+    import os
 
     # Удаляем стандартный обработчик
     logger.remove()
@@ -19,6 +20,9 @@ def setup_logger(level: str = "INFO", log_file: str = None):
 
     # Файловый вывод (если указан)
     if log_file:
+        # Создаем директорию для логов если её нет
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
         logger.add(
             log_file,
             level=level,

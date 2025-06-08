@@ -1,4 +1,3 @@
-# docker/docker-compose.yml
 version: '3.8'
 
 services:
@@ -8,14 +7,19 @@ services:
       dockerfile: docker/Dockerfile
     container_name: crypto-ai-trader
     restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - ../logs:/app/logs
       - ../.env:/app/.env
+    ports:
+      - "8000:8000"  # API порт
     depends_on:
       - redis
       - postgres
     networks:
       - crypto-trader-net
+    command: ["python", "main.py", "--mode", "both"]
 
   redis:
     image: redis:7-alpine
@@ -27,6 +31,7 @@ services:
       - redis-data:/data
     networks:
       - crypto-trader-net
+    command: redis-server --appendonly yes
 
   postgres:
     image: postgres:15-alpine
@@ -40,6 +45,20 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - crypto-trader-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: crypto-trader-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - crypto-trader
     networks:
       - crypto-trader-net
 

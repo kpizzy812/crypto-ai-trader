@@ -1,4 +1,4 @@
-import ccxt
+import ccxt.pro as ccxt  # Изменено на ccxt.pro для async
 import pandas as pd
 from typing import Dict, List, Optional
 from loguru import logger
@@ -64,3 +64,8 @@ class ExchangeDataCollector:
         except Exception as e:
             logger.error(f"Ошибка подключения к {self.exchange_name}: {e}")
             return False
+
+    async def close(self):
+        """Закрытие соединения"""
+        if self.exchange:
+            await self.exchange.close()
