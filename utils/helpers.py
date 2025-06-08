@@ -1,6 +1,6 @@
-# utils/helpers.py - ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# utils/helpers.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
-Вспомогательные функции
+Вспомогательные функции - исправленная версия с лучшей генерацией данных
 """
 import hashlib
 import secrets
@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from decimal import Decimal, ROUND_DOWN
 import pandas as pd
 from datetime import datetime, timedelta
+import numpy as np
 
 
 def generate_order_id() -> str:
@@ -107,43 +108,82 @@ def resample_ohlcv(df: pd.DataFrame, new_timeframe: str) -> pd.DataFrame:
 
 
 def create_sample_data(symbol: str, periods: int = 100,
-                       start_price: float = 100.0) -> pd.DataFrame:
-    """Создание тестовых данных для разработки"""
+                       start_price: float = 100.0,
+                       trend: float = 0.001) -> pd.DataFrame:
+    """Создание реалистичных тестовых данных для разработки"""
 
-    import numpy as np
-
-    # Генерация временных меток
+    # Генерация временных меток (каждые 5 минут)
     end_time = datetime.utcnow()
     start_time = end_time - timedelta(minutes=periods * 5)
     timestamps = pd.date_range(start_time, end_time, periods=periods)
 
-    # Генерация цен (случайное блуждание)
-    np.random.seed(42)  # Для воспроизводимости
-    returns = np.random.normal(0, 0.02, periods)  # 2% волатильность
-    prices = [start_price]
+    # Используем сид для воспроизводимости, но разный для разных символов
+    seed = hash(symbol) % 10000
+    np.random.seed(seed)
 
-    for ret in returns[1:]:
-        new_price = prices[-1] * (1 + ret)
+    # Генерация более реалистичных цен
+    prices = [start_price]
+    volumes = []
+
+    for i in range(1, periods):
+        # Добавляем трендовую составляющую
+        trend_component = trend * i
+
+        # Случайное изменение цены (geometric brownian motion)
+        random_change = np.random.normal(0, 0.01)  # 1% волатильность
+
+        # Рассчитываем новую цену
+        new_price = prices[-1] * (1 + trend_component + random_change)
+
+        # Не даем цене упасть ниже определенного уровня
+        new_price = max(new_price, start_price * 0.5)
+
         prices.append(new_price)
 
-    # Создание OHLCV
+        # Генерация объема (коррелирует с волатильностью)
+        base_volume = 1000
+        volatility_factor = abs(random_change) * 10
+        volume = base_volume * (1 + volatility_factor) * np.random.uniform(0.5, 2.0)
+        volumes.append(volume)
+
+    # Последний объем
+    volumes.append(np.random.uniform(500, 2000))
+
+    # Создание OHLCV на основе цен закрытия
     data = []
     for i, (timestamp, close) in enumerate(zip(timestamps, prices)):
         # Генерация open, high, low на основе close
-        open_price = prices[i - 1] if i > 0 else close
-        high = max(open_price, close) * np.random.uniform(1.0, 1.02)
-        low = min(open_price, close) * np.random.uniform(0.98, 1.0)
-        volume = np.random.uniform(1000, 10000)
+        if i == 0:
+            open_price = close
+        else:
+            # Open следующей свечи близок к close предыдущей
+            open_price = prices[i - 1] * np.random.uniform(0.999, 1.001)
+
+        # High и Low основываются на волатильности
+        volatility = abs(np.random.normal(0, 0.005))  # 0.5% внутридневная волатильность
+
+        high = max(open_price, close) * (1 + volatility)
+        low = min(open_price, close) * (1 - volatility)
+
+        # Убеждаемся что high >= max(open, close) и low <= min(open, close)
+        high = max(high, open_price, close)
+        low = min(low, open_price, close)
+
+        volume = volumes[i] if i < len(volumes) else np.random.uniform(500, 2000)
 
         data.append({
-            'open': open_price,
-            'high': high,
-            'low': low,
-            'close': close,
-            'volume': volume
+            'open': round(open_price, 2),
+            'high': round(high, 2),
+            'low': round(low, 2),
+            'close': round(close, 2),
+            'volume': round(volume, 2)
         })
 
     df = pd.DataFrame(data, index=timestamps)
+
+    # Убеждаемся что данные последовательны
+    df = df.dropna()
+
     return df
 
 
@@ -182,3 +222,25 @@ def retry_async(max_attempts: int = 3, delay: float = 1.0):
         return wrapper
 
     return decorator
+
+
+def create_realistic_market_data(symbol: str, periods: int = 1000) -> pd.DataFrame:
+    """Создание реалистичных рыночных данных для бэктестинга"""
+
+    # Базовые параметры в зависимости от символа
+    if 'BTC' in symbol:
+        base_price = 45000
+        volatility = 0.02  # 2% дневная волатильность
+    elif 'ETH' in symbol:
+        base_price = 2500
+        volatility = 0.025  # 2.5% дневная волатильность
+    else:
+        base_price = 100
+        volatility = 0.03  # 3% дневная волатильность
+
+    return create_sample_data(
+        symbol=symbol,
+        periods=periods,
+        start_price=base_price,
+        trend=np.random.normal(0, 0.0001)  # Случайный небольшой тренд
+    )

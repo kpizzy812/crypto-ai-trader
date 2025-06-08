@@ -1,27 +1,29 @@
-# ai/openai_analyzer.py
+# ai/openai_analyzer.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
-Интеграция с OpenAI для анализа рынка
+Интеграция с OpenAI для анализа рынка (обновлено для OpenAI API v1.x)
 """
 import json
 from typing import Dict, List, Any, Optional
 import pandas as pd
 from datetime import datetime
 from loguru import logger
-import openai
+from openai import OpenAI
 from config.settings import settings
 
 
 class OpenAIAnalyzer:
-    """AI анализатор на базе OpenAI"""
+    """AI анализатор на базе OpenAI (обновлено для v1.x API)"""
 
     def __init__(self):
         self.api_key = settings.openai_api_key
         if self.api_key:
-            openai.api_key = self.api_key
+            # Новый способ инициализации для OpenAI v1.x
+            self.client = OpenAI(api_key=self.api_key)
         else:
+            self.client = None
             logger.warning("OpenAI API key не установлен")
 
-        self.model = "gpt-4o"
+        self.model = "gpt-4o-mini"  # Обновленное название модели
         self.temperature = 0.7
 
     async def analyze_market(self, market_data: pd.DataFrame, symbol: str,
@@ -29,8 +31,8 @@ class OpenAIAnalyzer:
                              technical_indicators: Optional[Dict] = None) -> Dict:
         """Комплексный анализ рынка с помощью AI"""
 
-        if not self.api_key:
-            logger.error("OpenAI API key отсутствует")
+        if not self.client:
+            logger.error("OpenAI клиент не инициализирован")
             return self._get_default_analysis(symbol)
 
         try:
@@ -40,7 +42,7 @@ class OpenAIAnalyzer:
             # Формирование промпта
             prompt = self._create_analysis_prompt(context)
 
-            # Запрос к OpenAI
+            # Запрос к OpenAI с новым API
             response = await self._call_openai(prompt)
 
             # Парсинг ответа
@@ -115,25 +117,31 @@ class OpenAIAnalyzer:
         return prompt
 
     async def _call_openai(self, prompt: str) -> str:
-        """Вызов OpenAI API"""
+        """Вызов OpenAI API с новым интерфейсом"""
 
-        response = await openai.ChatCompletion.acreate(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Ты профессиональный криптотрейдер с 10-летним опытом. Даешь точные и обоснованные рекомендации."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=self.temperature,
-            response_format={"type": "json_object"}
-        )
+        try:
+            # Новый способ вызова для OpenAI v1.x
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Ты профессиональный криптотрейдер с 10-летним опытом. Даешь точные и обоснованные рекомендации в формате JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=self.temperature,
+                response_format={"type": "json_object"}
+            )
 
-        return response.choices[0].message.content
+            return response.choices[0].message.content
+
+        except Exception as e:
+            logger.error(f"Ошибка вызова OpenAI API: {e}")
+            raise
 
     def _parse_response(self, response: str, symbol: str) -> Dict:
         """Парсинг ответа от OpenAI"""
