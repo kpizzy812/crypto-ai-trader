@@ -1,4 +1,4 @@
-# exchange/binance_client.py - НЕДОСТАЮЩИЙ ФАЙЛ
+# exchange/binance_client.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
 Клиент для работы с Binance
 """
@@ -29,9 +29,23 @@ class BinanceClient(BaseExchange):
                 }
             })
 
-            # Загрузка рынков
-            self._markets = await self.exchange.load_markets()
-            logger.info(f"Подключено к Binance {'testnet' if self.testnet else 'mainnet'}")
+            # Загрузка рынков - ИСПРАВЛЕНИЕ: убираем await для синхронного метода
+            try:
+                if hasattr(self.exchange, 'load_markets'):
+                    # Проверяем, является ли метод асинхронным
+                    import inspect
+                    if inspect.iscoroutinefunction(self.exchange.load_markets):
+                        self._markets = await self.exchange.load_markets()
+                    else:
+                        self._markets = self.exchange.load_markets()
+                else:
+                    self._markets = {}
+
+                logger.info(f"Подключено к Binance {'testnet' if self.testnet else 'mainnet'}")
+
+            except Exception as markets_error:
+                logger.warning(f"Не удалось загрузить рынки Binance: {markets_error}")
+                self._markets = {}
 
         except Exception as e:
             logger.error(f"Ошибка подключения к Binance: {e}")
@@ -40,21 +54,35 @@ class BinanceClient(BaseExchange):
     async def disconnect(self):
         """Отключение от Binance"""
         if self.exchange:
-            await self.exchange.close()
-            logger.info("Отключено от Binance")
+            try:
+                # Проверяем есть ли метод close и является ли он асинхронным
+                if hasattr(self.exchange, 'close'):
+                    import inspect
+                    if inspect.iscoroutinefunction(self.exchange.close):
+                        await self.exchange.close()
+                    else:
+                        self.exchange.close()
+                logger.info("Отключено от Binance")
+            except Exception as e:
+                logger.warning(f"Ошибка при отключении от Binance: {e}")
 
     async def get_balance(self) -> Dict[str, Dict]:
         """Получение балансов"""
         try:
-            balance = await self.exchange.fetch_balance()
+            # Проверяем асинхронность метода
+            import inspect
+            if inspect.iscoroutinefunction(self.exchange.fetch_balance):
+                balance = await self.exchange.fetch_balance()
+            else:
+                balance = self.exchange.fetch_balance()
 
             # Форматирование для унифицированного интерфейса
             formatted_balance = {}
-            for currency, data in balance['total'].items():
+            for currency, data in balance.get('total', {}).items():
                 if data > 0:
                     formatted_balance[currency] = {
-                        'free': Decimal(str(balance['free'].get(currency, 0))),
-                        'used': Decimal(str(balance['used'].get(currency, 0))),
+                        'free': Decimal(str(balance.get('free', {}).get(currency, 0))),
+                        'used': Decimal(str(balance.get('used', {}).get(currency, 0))),
                         'total': Decimal(str(data))
                     }
 
@@ -78,18 +106,30 @@ class BinanceClient(BaseExchange):
                 'reduceOnly': False
             }
 
-            # Размещение ордера
+            # Размещение ордера - проверяем асинхронность
+            import inspect
+
             if order_type == 'market':
-                raw_order = await self.exchange.create_market_order(
-                    symbol, side, float(quantity), params
-                )
+                if inspect.iscoroutinefunction(self.exchange.create_market_order):
+                    raw_order = await self.exchange.create_market_order(
+                        symbol, side, float(quantity), None, params
+                    )
+                else:
+                    raw_order = self.exchange.create_market_order(
+                        symbol, side, float(quantity), None, params
+                    )
             else:
                 if price is None:
                     raise ValueError("Цена обязательна для лимитного ордера")
 
-                raw_order = await self.exchange.create_limit_order(
-                    symbol, side, float(quantity), float(price), params
-                )
+                if inspect.iscoroutinefunction(self.exchange.create_limit_order):
+                    raw_order = await self.exchange.create_limit_order(
+                        symbol, side, float(quantity), float(price), params
+                    )
+                else:
+                    raw_order = self.exchange.create_limit_order(
+                        symbol, side, float(quantity), float(price), params
+                    )
 
             # Конвертация в наш формат
             order = self._normalize_order(raw_order)
@@ -104,7 +144,12 @@ class BinanceClient(BaseExchange):
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
         """Отмена ордера"""
         try:
-            await self.exchange.cancel_order(order_id, symbol)
+            import inspect
+            if inspect.iscoroutinefunction(self.exchange.cancel_order):
+                await self.exchange.cancel_order(order_id, symbol)
+            else:
+                self.exchange.cancel_order(order_id, symbol)
+
             logger.info(f"Отменен ордер на Binance: {order_id}")
             return True
 
@@ -115,7 +160,12 @@ class BinanceClient(BaseExchange):
     async def get_order(self, order_id: str, symbol: str) -> Optional[Order]:
         """Получение информации об ордере"""
         try:
-            raw_order = await self.exchange.fetch_order(order_id, symbol)
+            import inspect
+            if inspect.iscoroutinefunction(self.exchange.fetch_order):
+                raw_order = await self.exchange.fetch_order(order_id, symbol)
+            else:
+                raw_order = self.exchange.fetch_order(order_id, symbol)
+
             return self._normalize_order(raw_order)
 
         except Exception as e:
