@@ -538,8 +538,7 @@ class Backtester:
 
         return max(0, min(1, risk_score))
 
-    def _determine_time_horizon(self, data: pd.DataFrame,
-                                analysis: Dict) -> str:
+    def _determine_time_horizon(self, data: pd.DataFrame, analysis: Dict) -> str:
         """Определение временного горизонта позиции"""
 
         # На основе волатильности и тренда
@@ -552,4 +551,4 @@ class Backtester:
             elif short_trend != medium_trend:
                 return 'short'  # Противоречивые сигналы - краткосрочно
 
-        return
+        return 'short'  # По умолчанию краткосрочная
