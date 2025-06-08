@@ -23,7 +23,7 @@ class RiskMetrics:
 
 
 class RiskManager:
-    """Управление рисками"""
+    """Управление рисками - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
 
     def __init__(self, risk_config: RiskConfig, portfolio: Portfolio):
         self.config = risk_config
@@ -70,7 +70,7 @@ class RiskManager:
         position_size = risk_amount / stop_distance
 
         # Ограничение максимальным размером
-        max_position_value = balance * (self.config.max_position_size_percent / 100)
+        max_position_value = balance * (Decimal(str(self.config.max_position_size_percent)) / 100)
 
         return min(position_size, max_position_value)
 
@@ -119,12 +119,12 @@ class RiskManager:
 
         daily_loss_percent = ((self.daily_start_balance - current_balance) / self.daily_start_balance) * 100
 
-        return daily_loss_percent >= self.config.max_daily_loss_percent
+        return daily_loss_percent >= Decimal(str(self.config.max_daily_loss_percent))
 
     async def _check_drawdown_limit(self) -> bool:
         """Проверка лимита просадки"""
         metrics = await self.get_risk_metrics()
-        return metrics.current_drawdown >= self.config.max_drawdown_percent
+        return metrics.current_drawdown >= Decimal(str(self.config.max_drawdown_percent))
 
     async def _calculate_position_risk(self) -> Decimal:
         """Расчет риска по открытым позициям"""
@@ -147,16 +147,20 @@ class RiskManager:
 
     def _calculate_risk_score(self, drawdown: Decimal, daily_loss: Decimal,
                               position_risk: Decimal) -> int:
-        """Расчет общего риск-скора"""
+        """Расчет общего риск-скора - ИСПРАВЛЕНА ОШИБКА ТИПОВ"""
         # Веса для разных компонентов риска
         drawdown_weight = 0.4
         daily_loss_weight = 0.3
         position_risk_weight = 0.3
 
-        # Нормализация значений (0-100)
-        drawdown_score = min(float(drawdown / self.config.max_drawdown_percent) * 100, 100)
-        daily_loss_score = min(float(daily_loss / self.config.max_daily_loss_percent) * 100, 100)
-        position_risk_score = min(float(position_risk / 10) * 100, 100)  # 10% как максимум
+        # ИСПРАВЛЕНИЕ: Конвертируем Decimal в float и используем правильные типы
+        max_drawdown_decimal = Decimal(str(self.config.max_drawdown_percent))
+        max_daily_loss_decimal = Decimal(str(self.config.max_daily_loss_percent))
+
+        # Нормализация значений (0-100) с правильными типами
+        drawdown_score = min(float(drawdown / max_drawdown_decimal) * 100, 100)
+        daily_loss_score = min(float(daily_loss / max_daily_loss_decimal) * 100, 100)
+        position_risk_score = min(float(position_risk / Decimal("10")) * 100, 100)  # 10% как максимум
 
         # Взвешенный расчет
         risk_score = (

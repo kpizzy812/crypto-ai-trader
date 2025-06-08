@@ -16,8 +16,8 @@ from models.trading_signals import (
 )
 
 
-class EnhancedSignalProcessor:
-    """Улучшенный процессор торговых сигналов"""
+class SignalProcessor:
+    """Процессор торговых сигналов - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
 
     def __init__(self, event_bus: EventBus, risk_manager: RiskManager):
         self.event_bus = event_bus
@@ -27,7 +27,7 @@ class EnhancedSignalProcessor:
 
     async def initialize(self):
         """Инициализация процессора"""
-        logger.info("⚡ Инициализация улучшенного процессора сигналов")
+        logger.info("⚡ Инициализация процессора сигналов")
 
         # Подписка на события с улучшенной обработкой ошибок
         self.event_bus.subscribe(EventType.AI_ANALYSIS_COMPLETE, self._on_analysis_complete_safe)
@@ -213,7 +213,7 @@ class EnhancedSignalProcessor:
                     'timestamp': signal.generated_at.isoformat(),
                     'metadata': signal.metadata
                 },
-                source="EnhancedSignalProcessor"
+                source="SignalProcessor"
             ))
 
             logger.info(f"🎯 Сгенерирован сигнал: {signal.symbol} {signal.action.value} "
@@ -266,7 +266,7 @@ class EnhancedSignalProcessor:
 
     async def stop(self):
         """Остановка процессора"""
-        logger.info("⚡ Остановка улучшенного процессора сигналов")
+        logger.info("⚡ Остановка процессора сигналов")
 
         # Сохранение статистики
         stats = await self.get_signal_statistics()
@@ -274,6 +274,12 @@ class EnhancedSignalProcessor:
 
         self.processed_signals.clear()
         self.signal_history.clear()
+
+
+# Класс для совместимости с импортами
+class EnhancedSignalProcessor(SignalProcessor):
+    """Алиас для совместимости"""
+    pass
 
 
 # Исправления для использования в TradingEngine
@@ -353,4 +359,3 @@ class EventDataFixer:
             'support_levels': [float(x) for x in support_levels]
         }
 
-    
