@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from decimal import Decimal
 from loguru import logger
 import json
+import pandas as pd
 
 from core.event_bus import EventBus, Event, EventType
 from risk.risk_manager import RiskManager
@@ -302,3 +303,54 @@ class EventDataFixer:
                 analysis['symbol'] = fixed_data.get('symbol', 'UNKNOWN')
 
         return fixed_data
+
+    def _determine_trend(self, data: pd.DataFrame) -> str:
+        """Определение тренда (копия из market_analyzer)"""
+        if len(data) < 2:
+            return 'neutral'
+
+        start_price = data['close'].iloc[0]
+        end_price = data['close'].iloc[-1]
+        change_percent = (end_price - start_price) / start_price * 100
+
+        if change_percent > 2:
+            return 'strong_uptrend'
+        elif change_percent > 0.5:
+            return 'uptrend'
+        elif change_percent < -2:
+            return 'strong_downtrend'
+        elif change_percent < -0.5:
+            return 'downtrend'
+        else:
+            return 'sideways'
+
+    def _find_support_resistance(self, data: pd.DataFrame) -> Dict:
+        """Поиск уровней поддержки и сопротивления (упрощенная версия)"""
+        if len(data) < 10:
+            return {
+                'nearest_resistance': None,
+                'nearest_support': None,
+                'resistance_levels': [],
+                'support_levels': []
+            }
+
+        # Простой метод: локальные минимумы и максимумы
+        highs = data['high'].rolling(window=5).max()
+        lows = data['low'].rolling(window=5).min()
+
+        current_price = float(data['close'].iloc[-1])
+
+        # Ближайшие уровни
+        resistance_levels = highs[highs > current_price].dropna().unique()[-3:] if len(
+            highs[highs > current_price]) > 0 else []
+        support_levels = lows[lows < current_price].dropna().unique()[:3] if len(
+            lows[lows < current_price]) > 0 else []
+
+        return {
+            'nearest_resistance': float(resistance_levels[0]) if len(resistance_levels) > 0 else None,
+            'nearest_support': float(support_levels[-1]) if len(support_levels) > 0 else None,
+            'resistance_levels': [float(x) for x in resistance_levels],
+            'support_levels': [float(x) for x in support_levels]
+        }
+
+    

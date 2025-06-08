@@ -250,6 +250,108 @@ class MarketAnalyzer:
         else:
             return 'short'
 
+    def _determine_trend(self, data: pd.DataFrame) -> str:
+        """Определение тренда на основе цен и скользящих средних"""
+        if len(data) < 2:
+            return 'neutral'
+
+        # Простое определение по направлению цены
+        start_price = data['close'].iloc[0]
+        end_price = data['close'].iloc[-1]
+        price_change_percent = (end_price - start_price) / start_price * 100
+
+        # Определение по скользящим средним если есть
+        ema_trend = None
+        if 'ema_fast' in data.columns and 'ema_slow' in data.columns:
+            current_fast = data['ema_fast'].iloc[-1]
+            current_slow = data['ema_slow'].iloc[-1]
+
+            if not (pd.isna(current_fast) or pd.isna(current_slow)):
+                ema_diff = (current_fast - current_slow) / current_slow * 100
+
+                if ema_diff > 2:
+                    ema_trend = 'strong_uptrend'
+                elif ema_diff > 0.5:
+                    ema_trend = 'uptrend'
+                elif ema_diff < -2:
+                    ema_trend = 'strong_downtrend'
+                elif ema_diff < -0.5:
+                    ema_trend = 'downtrend'
+                else:
+                    ema_trend = 'sideways'
+
+        # Определение по изменению цены
+        if price_change_percent > 3:
+            price_trend = 'strong_uptrend'
+        elif price_change_percent > 1:
+            price_trend = 'uptrend'
+        elif price_change_percent < -3:
+            price_trend = 'strong_downtrend'
+        elif price_change_percent < -1:
+            price_trend = 'downtrend'
+        else:
+            price_trend = 'sideways'
+
+        # Комбинированное решение
+        if ema_trend:
+            # Если есть EMA данные, используем их с весом
+            if ema_trend == price_trend:
+                return ema_trend
+            elif 'strong' in ema_trend and 'strong' in price_trend:
+                return ema_trend  # Приоритет EMA для сильных трендов
+            else:
+                return 'sideways'  # При конфликте - боковой тренд
+        else:
+            return price_trend
+
+    def _find_support_resistance(self, data: pd.DataFrame) -> Dict:
+        """Поиск уровней поддержки и сопротивления"""
+        if len(data) < 20:
+            return {
+                'nearest_resistance': None,
+                'nearest_support': None,
+                'resistance_levels': [],
+                'support_levels': []
+            }
+
+        # Локальные максимумы и минимумы
+        window = min(10, len(data) // 4)  # Адаптивное окно
+
+        # Локальные максимумы (потенциальные сопротивления)
+        highs = data['high'].rolling(window=window, center=True).max()
+        local_maxima = data['high'][data['high'] == highs]
+
+        # Локальные минимумы (потенциальные поддержки)
+        lows = data['low'].rolling(window=window, center=True).min()
+        local_minima = data['low'][data['low'] == lows]
+
+        current_price = float(data['close'].iloc[-1])
+
+        # Фильтруем уровни
+        resistance_levels = []
+        support_levels = []
+
+        # Сопротивления (выше текущей цены)
+        for price in local_maxima.dropna().values:
+            if price > current_price:
+                resistance_levels.append(float(price))
+
+        # Поддержки (ниже текущей цены)
+        for price in local_minima.dropna().values:
+            if price < current_price:
+                support_levels.append(float(price))
+
+        # Сортируем и берем ближайшие
+        resistance_levels = sorted(set(resistance_levels))[:5]  # Топ 5 ближайших
+        support_levels = sorted(set(support_levels), reverse=True)[:5]  # Топ 5 ближайших
+
+        return {
+            'nearest_resistance': resistance_levels[0] if resistance_levels else None,
+            'nearest_support': support_levels[0] if support_levels else None,
+            'resistance_levels': resistance_levels,
+            'support_levels': support_levels
+        }
+
     def get_cached_analysis(self, symbol: str) -> Optional[Dict]:
         """Получение кэшированного анализа"""
         return self.analysis_cache.get(symbol)

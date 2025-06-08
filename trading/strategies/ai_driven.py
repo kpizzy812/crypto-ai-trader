@@ -134,6 +134,128 @@ class AIDrivenStrategy(BaseStrategy):
         if len(data) < 2:
             return 'short'  # По умолчанию краткосрочная
 
+    def _determine_time_horizon(self, data: pd.DataFrame) -> str:
+        """Определение временного горизонта позиции"""
+        if len(data) < 20:
+            return 'short'
+
+        # Анализ волатильности
+        returns = data['close'].pct_change().dropna()
+        volatility = returns.tail(20).std()
+
+        # Анализ трендов на разных периодах
+        short_trend = self._determine_trend(data.tail(20))
+        medium_trend = self._determine_trend(data.tail(50)) if len(data) >= 50 else None
+
+        # Анализ объема
+        volume_trend = 'stable'
+        if 'volume_sma' in data.columns:
+            current_vol = data['volume'].iloc[-1]
+            avg_vol = data['volume_sma'].iloc[-1]
+
+            if current_vol > avg_vol * 1.5:
+                volume_trend = 'high'
+            elif current_vol < avg_vol * 0.7:
+                volume_trend = 'low'
+
+        # Логика определения горизонта
+        if volatility > 0.03:  # Высокая волатильность > 3%
+            return 'short'  # При высокой волатильности - краткосрочно
+
+        if short_trend == medium_trend and 'strong' in short_trend:
+            return 'medium'  # Сильный устойчивый тренд - средний срок
+
+        if short_trend != medium_trend:
+            return 'short'  # Противоречивые сигналы - краткосрочно
+
+        if volume_trend == 'high' and 'strong' in short_trend:
+            return 'medium'  # Высокий объем + сильный тренд
+
+        return 'short'  # По умолчанию краткосрочно
+
+    def _find_support_resistance(self, data: pd.DataFrame) -> Dict:
+        """Поиск уровней поддержки и сопротивления для AI стратегии"""
+        if len(data) < 20:
+            return {
+                'support_levels': [],
+                'resistance_levels': [],
+                'pivot_points': []
+            }
+
+        current_price = float(data['close'].iloc[-1])
+
+        # Метод 1: Локальные экстремумы
+        window = 14
+
+        # Поиск локальных максимумов
+        highs = data['high'].rolling(window=window, center=True).max()
+        resistance_points = []
+
+        for i in range(window, len(data) - window):
+            if data['high'].iloc[i] == highs.iloc[i]:
+                resistance_points.append(float(data['high'].iloc[i]))
+
+        # Поиск локальных минимумов
+        lows = data['low'].rolling(window=window, center=True).min()
+        support_points = []
+
+        for i in range(window, len(data) - window):
+            if data['low'].iloc[i] == lows.iloc[i]:
+                support_points.append(float(data['low'].iloc[i]))
+
+        # Метод 2: Психологические уровни (круглые числа)
+        psychological_levels = []
+        if current_price > 1000:
+            # Для больших цен - тысячи
+            base = int(current_price // 1000) * 1000
+            for i in range(-2, 3):
+                psychological_levels.append(base + i * 1000)
+        elif current_price > 100:
+            # Для средних цен - сотни
+            base = int(current_price // 100) * 100
+            for i in range(-3, 4):
+                psychological_levels.append(base + i * 100)
+        else:
+            # Для малых цен - десятки
+            base = int(current_price // 10) * 10
+            for i in range(-5, 6):
+                psychological_levels.append(base + i * 10)
+
+        # Объединяем и фильтруем
+        all_resistance = resistance_points + [p for p in psychological_levels if p > current_price]
+        all_support = support_points + [p for p in psychological_levels if p < current_price]
+
+        # Убираем дубликаты и сортируем
+        resistance_levels = sorted(list(set(all_resistance)))[:10]
+        support_levels = sorted(list(set(all_support)), reverse=True)[:10]
+
+        # Pivot points (классические)
+        if len(data) >= 3:
+            yesterday = data.iloc[-2]  # Предыдущий день
+            pivot = (yesterday['high'] + yesterday['low'] + yesterday['close']) / 3
+
+            r1 = 2 * pivot - yesterday['low']
+            r2 = pivot + (yesterday['high'] - yesterday['low'])
+            s1 = 2 * pivot - yesterday['high']
+            s2 = pivot - (yesterday['high'] - yesterday['low'])
+
+            pivot_points = {
+                'pivot': float(pivot),
+                'r1': float(r1),
+                'r2': float(r2),
+                's1': float(s1),
+                's2': float(s2)
+            }
+        else:
+            pivot_points = {}
+
+        return {
+            'support_levels': support_levels,
+            'resistance_levels': resistance_levels,
+            'pivot_points': pivot_points,
+            'psychological_levels': [p for p in psychological_levels if abs(p - current_price) / current_price < 0.1]
+        }
+
     def _create_market_snapshot(self, data: pd.DataFrame) -> Dict:
         """Создание снимка состояния рынка"""
 
