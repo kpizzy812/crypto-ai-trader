@@ -1,5 +1,6 @@
 # core/__init__.py
-from .engine import TradingEngine
+# Импортируем сначала exceptions, потом engine
 from .exceptions import TradingError, ExchangeError, RiskError
+from .engine import TradingEngine
 
 __all__ = ['TradingEngine', 'TradingError', 'ExchangeError', 'RiskError']

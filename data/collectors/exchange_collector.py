@@ -1,8 +1,18 @@
-import ccxt.pro as ccxt  # Изменено на ccxt.pro для async
+# data/collectors/exchange_collector.py
+import ccxt.pro as ccxt
 import pandas as pd
 from typing import Dict, List, Optional
 from loguru import logger
-from core.exceptions import ExchangeError, DataError
+
+
+class ExchangeError(Exception):
+    """Локальное определение ошибки для избежания циклического импорта"""
+    pass
+
+
+class DataError(Exception):
+    """Локальное определение ошибки для избежания циклического импорта"""
+    pass
 
 
 class ExchangeDataCollector:
@@ -16,12 +26,47 @@ class ExchangeDataCollector:
         try:
             # Создание объекта биржи
             exchange_class = getattr(ccxt, exchange_name.lower())
-            self.exchange = exchange_class({
+
+            # Настройки для testnet
+            config = {
                 'apiKey': api_key,
                 'secret': api_secret,
-                'sandbox': testnet,
                 'enableRateLimit': True,
-            })
+            }
+
+            # Специфичные настройки для разных бирж
+            if exchange_name.lower() == 'bybit':
+                if testnet:
+                    # Для Bybit testnet используем специальные URLs
+                    config['test'] = True
+                    config['urls'] = {
+                        'api': {
+                            'public': 'https://api-testnet.bybit.com',
+                            'private': 'https://api-testnet.bybit.com',
+                        }
+                    }
+                config['options'] = {
+                    'defaultType': 'linear',  # USDT perpetual
+                    'adjustForTimeDifference': True,
+                    'recvWindow': 20000
+                }
+
+            elif exchange_name.lower() == 'binance':
+                if testnet:
+                    config['test'] = True
+                    config['urls'] = {
+                        'api': {
+                            'public': 'https://testnet.binance.vision/api',
+                            'private': 'https://testnet.binance.vision/api',
+                        }
+                    }
+                config['options'] = {
+                    'defaultType': 'future',
+                    'adjustForTimeDifference': True
+                }
+
+            self.exchange = exchange_class(config)
+
         except AttributeError:
             raise ExchangeError(f"Неподдерживаемая биржа: {exchange_name}")
         except Exception as e:

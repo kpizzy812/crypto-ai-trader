@@ -52,6 +52,7 @@ def run():
 async def _analyze_market(symbol: str, timeframe: str, limit: int):
     """Анализ рынка"""
     settings = Settings()
+    collector = None
 
     try:
         # Подключение к бирже
@@ -93,11 +94,16 @@ async def _analyze_market(symbol: str, timeframe: str, limit: int):
     except Exception as e:
         logger.error(f"Ошибка анализа: {e}")
         click.echo(f"❌ Ошибка: {e}")
+    finally:
+        # ВАЖНО: Закрываем соединение
+        if collector:
+            await collector.close()
 
 
 async def _test_exchange_connection(exchange: str):
     """Тест подключения к бирже"""
     settings = Settings()
+    collector = None
 
     try:
         if exchange.lower() == 'bybit':
@@ -135,11 +141,16 @@ async def _test_exchange_connection(exchange: str):
     except Exception as e:
         logger.error(f"Ошибка подключения: {e}")
         click.echo(f"❌ Ошибка: {e}")
+    finally:
+        # ВАЖНО: Закрываем соединение
+        if collector:
+            await collector.close()
 
 
 async def _ai_analyze_market(symbol: str, mock: bool):
     """AI анализ рынка"""
     settings = Settings()
+    collector = None
 
     try:
         # Получение рыночных данных
@@ -184,6 +195,10 @@ async def _ai_analyze_market(symbol: str, mock: bool):
     except Exception as e:
         logger.error(f"Ошибка AI анализа: {e}")
         click.echo(f"❌ Ошибка: {e}")
+    finally:
+        # ВАЖНО: Закрываем соединение
+        if collector:
+            await collector.close()
 
 
 async def _run_trading_engine():

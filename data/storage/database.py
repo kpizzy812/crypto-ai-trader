@@ -29,7 +29,7 @@ class Trade(Base):
     strategy = Column(String(50))
     opened_at = Column(DateTime, default=datetime.utcnow)
     closed_at = Column(DateTime)
-    metadata = Column(Text)
+    context_json = Column(Text)
 
 
 class MarketData(Base):

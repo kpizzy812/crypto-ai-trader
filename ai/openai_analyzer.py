@@ -21,7 +21,7 @@ class OpenAIAnalyzer:
         else:
             logger.warning("OpenAI API key не установлен")
 
-        self.model = "gpt-4-turbo-preview"
+        self.model = "gpt-4o"
         self.temperature = 0.7
 
     async def analyze_market(self, market_data: pd.DataFrame, symbol: str,

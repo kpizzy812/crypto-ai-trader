@@ -378,5 +378,5 @@ async def periodic_updates():
             await asyncio.sleep(10)
 
 
-# Статические файлы
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
+# # Статические файлы
+# app.mount("/static", StaticFiles(directory="web/static"), name="static")
