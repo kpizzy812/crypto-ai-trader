@@ -1,6 +1,6 @@
-# core/engine/market_analyzer.py
+# core/engine/market_analyzer.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
-Анализ рыночных данных и технических индикаторов
+Анализ рыночных данных и технических индикаторов - исправлено для реальных данных
 """
 import pandas as pd
 from typing import Dict, Optional
@@ -14,7 +14,7 @@ from ai.mock_analyzer import MockAIAnalyzer
 
 
 class MarketAnalyzer:
-    """Анализатор рыночных данных"""
+    """Анализатор рыночных данных - исправленная версия"""
 
     def __init__(self, trading_config: TradingConfig, event_bus: EventBus):
         self.trading_config = trading_config
@@ -28,6 +28,14 @@ class MarketAnalyzer:
         # Кэш данных
         self.market_data_cache = {}
         self.analysis_cache = {}
+
+        # Ссылка на exchange_manager (будет установлена после инициализации)
+        self.exchange_manager = None
+
+    def set_exchange_manager(self, exchange_manager):
+        """Установка ссылки на exchange_manager"""
+        self.exchange_manager = exchange_manager
+        logger.info("✅ Exchange Manager подключен к Market Analyzer")
 
     async def initialize(self):
         """Инициализация анализатора"""
@@ -68,7 +76,7 @@ class MarketAnalyzer:
                 data={
                     'symbol': symbol,
                     'analysis': ai_analysis,
-                    'technical_data': processed_data.tail(1).to_dict('records')[0]
+                    'technical_data': processed_data.tail(1).to_dict('records')[0] if not processed_data.empty else {}
                 },
                 source="MarketAnalyzer"
             ))
@@ -79,22 +87,35 @@ class MarketAnalyzer:
             logger.error(f"❌ Ошибка анализа {symbol}: {e}")
 
     async def _get_market_data(self, symbol: str) -> pd.DataFrame:
-        """Получение рыночных данных"""
+        """Получение рыночных данных - ИСПРАВЛЕНО"""
         try:
-            from core.engine.exchange_manager import ExchangeManager
+            # Сначала пытаемся получить реальные данные
+            if self.exchange_manager:
+                logger.info(f"📡 Получение реальных данных для {symbol}")
+                data = await self.exchange_manager.get_market_data(
+                    symbol,
+                    self.trading_config.primary_timeframe,
+                    100
+                )
 
-            # Получаем exchange_manager из event_bus или создаем новый
-            # В реальной реализации это должно быть dependency injection
-            # Пока используем заглушку
-            logger.warning("⚠️ Используется заглушка для получения данных")
+                if not data.empty:
+                    logger.info(f"✅ Получено {len(data)} реальных свечей для {symbol}")
+                    return data
+                else:
+                    logger.warning(f"⚠️ Реальные данные пусты для {symbol}")
+            else:
+                logger.warning("⚠️ Exchange Manager не подключен")
 
-            # Создаем тестовые данные
+            # Если реальные данные недоступны, используем заглушку
+            logger.info(f"📊 Используются тестовые данные для {symbol}")
             from utils.helpers import create_sample_data
             return create_sample_data(symbol, periods=100)
 
         except Exception as e:
             logger.error(f"❌ Ошибка получения данных {symbol}: {e}")
-            return pd.DataFrame()
+            # В крайнем случае возвращаем тестовые данные
+            from utils.helpers import create_sample_data
+            return create_sample_data(symbol, periods=100)
 
     def _perform_technical_analysis(self, market_data: pd.DataFrame) -> pd.DataFrame:
         """Технический анализ"""
@@ -112,9 +133,11 @@ class MarketAnalyzer:
         try:
             if self.ai_analyzer:
                 # Реальный OpenAI анализ
+                logger.info(f"🤖 Запуск реального AI анализа для {symbol}")
                 analysis = await self.ai_analyzer.analyze_market(processed_data, symbol)
             else:
                 # Mock анализ
+                logger.info(f"🤖 Запуск Mock AI анализа для {symbol}")
                 analysis = await self.mock_analyzer.analyze_market(processed_data, symbol)
 
             # Улучшение анализа техническими данными

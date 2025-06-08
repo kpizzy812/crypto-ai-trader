@@ -1,6 +1,6 @@
-# core/engine/trading_engine.py
+# core/engine/trading_engine.py - ОБНОВЛЕННАЯ ВЕРСИЯ
 """
-Основной торговый движок - только оркестрация компонентов
+Основной торговый движок - обновлен для подключения компонентов
 """
 import asyncio
 from typing import Dict, List, Optional
@@ -22,7 +22,7 @@ from .notification_manager import NotificationManager
 
 
 class TradingEngine:
-    """Главный оркестратор торговой системы"""
+    """Главный оркестратор торговой системы - обновленная версия"""
 
     def __init__(self, settings: Settings, trading_config: TradingConfig):
         self.settings = settings
@@ -49,6 +49,10 @@ class TradingEngine:
         # Порядок инициализации важен!
         await self.event_bus.start()
         await self.exchange_manager.initialize()
+
+        # ВАЖНО: Подключаем exchange_manager к market_analyzer
+        self.market_analyzer.set_exchange_manager(self.exchange_manager)
+
         await self.market_analyzer.initialize()
         await self.strategy_manager.initialize()
         await self.signal_processor.initialize()
@@ -95,6 +99,39 @@ class TradingEngine:
 
         except Exception as e:
             logger.error(f"❌ Ошибка в торговом цикле: {e}")
+
+    async def test_real_analysis(self, symbol: str):
+        """Тестирование реального анализа с отчетом"""
+        logger.info(f"🧪 Тестирование реального анализа для {symbol}")
+
+        try:
+            # Получаем реальные данные напрямую
+            real_data = await self.exchange_manager.get_market_data(symbol, "5m", 100)
+
+            if not real_data.empty:
+                logger.info(f"✅ Получено {len(real_data)} реальных свечей")
+
+                # Анализ с использованием mock AI (для безопасности)
+                analysis = await self.market_analyzer.mock_analyzer.analyze_market(real_data, symbol)
+
+                logger.info(f"🤖 AI рекомендация: {analysis['action']}")
+                logger.info(f"💪 Уверенность: {analysis['confidence']:.2%}")
+
+                return {
+                    'symbol': symbol,
+                    'data_points': len(real_data),
+                    'current_price': float(real_data['close'].iloc[-1]),
+                    'price_change_24h': float(
+                        (real_data['close'].iloc[-1] - real_data['close'].iloc[0]) / real_data['close'].iloc[0] * 100),
+                    'analysis': analysis
+                }
+            else:
+                logger.warning(f"⚠️ Нет реальных данных для {symbol}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка тестирования анализа {symbol}: {e}")
+            return None
 
     async def stop(self):
         """Остановка всех компонентов"""

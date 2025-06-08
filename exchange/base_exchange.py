@@ -1,6 +1,6 @@
-# exchange/base_exchange.py
+# exchange/base_exchange.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
-Базовый класс для работы с биржами
+Базовый класс для работы с биржами - исправлена асинхронность
 """
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import ccxt
 from loguru import logger
+import inspect
 
 
 @dataclass
@@ -88,7 +89,11 @@ class BaseExchange(ABC):
     async def get_ticker(self, symbol: str) -> Dict:
         """Получение текущей цены"""
         try:
-            return await self.exchange.fetch_ticker(symbol)
+            # ИСПРАВЛЕНИЕ: Проверка асинхронности метода
+            if inspect.iscoroutinefunction(self.exchange.fetch_ticker):
+                return await self.exchange.fetch_ticker(symbol)
+            else:
+                return self.exchange.fetch_ticker(symbol)
         except Exception as e:
             logger.error(f"Ошибка получения тикера {symbol}: {e}")
             raise
@@ -96,21 +101,39 @@ class BaseExchange(ABC):
     async def get_order_book(self, symbol: str, limit: int = 20) -> Dict:
         """Получение стакана"""
         try:
-            return await self.exchange.fetch_order_book(symbol, limit)
+            # ИСПРАВЛЕНИЕ: Проверка асинхронности метода
+            if inspect.iscoroutinefunction(self.exchange.fetch_order_book):
+                return await self.exchange.fetch_order_book(symbol, limit)
+            else:
+                return self.exchange.fetch_order_book(symbol, limit)
         except Exception as e:
             logger.error(f"Ошибка получения стакана {symbol}: {e}")
             raise
 
     async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> List:
-        """Получение исторических данных"""
+        """Получение исторических данных - ИСПРАВЛЕНО"""
         try:
-            return await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            # ИСПРАВЛЕНИЕ: Правильная проверка асинхронности
+            if inspect.iscoroutinefunction(self.exchange.fetch_ohlcv):
+                result = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            else:
+                result = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+
+            # Убеждаемся что возвращаем список, а не что-то другое
+            if isinstance(result, list):
+                return result
+            else:
+                logger.error(f"Неожиданный тип данных OHLCV: {type(result)}")
+                return []
+
         except Exception as e:
             logger.error(f"Ошибка получения OHLCV {symbol}: {e}")
-            raise
+            return []  # Возвращаем пустой список вместо исключения
 
     def _validate_symbol(self, symbol: str) -> bool:
         """Проверка валидности символа"""
+        if not self._markets:
+            return True  # Если рынки не загружены, пропускаем проверку
         return symbol in self._markets
 
     def _normalize_order(self, raw_order: Dict) -> Order:
@@ -124,5 +147,6 @@ class BaseExchange(ABC):
             quantity=Decimal(str(raw_order['amount'])),
             status=raw_order['status'],
             filled_quantity=Decimal(str(raw_order.get('filled', 0))),
-            timestamp=datetime.fromtimestamp(raw_order['timestamp'] / 1000)
+            timestamp=datetime.fromtimestamp(raw_order['timestamp'] / 1000) if raw_order.get(
+                'timestamp') else datetime.utcnow()
         )

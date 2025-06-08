@@ -1,6 +1,7 @@
-# cli.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# cli.py - ОБНОВЛЕННАЯ ВЕРСИЯ С РЕАЛЬНЫМИ ДАННЫМИ
 import click
 import asyncio
+import pandas as pd
 from loguru import logger
 from config import Settings, TradingConfig
 from utils.logger import setup_logger
@@ -12,7 +13,7 @@ setup_logger()
 
 @click.group()
 def cli():
-    """Crypto AI Trader CLI - Исправленная версия"""
+    """Crypto AI Trader CLI - Обновленная версия с реальными данными"""
     pass
 
 
@@ -20,9 +21,10 @@ def cli():
 @click.option('--symbol', default='BTCUSDT', help='Торговая пара')
 @click.option('--timeframe', default='5m', help='Таймфрейм')
 @click.option('--limit', default=100, help='Количество свечей')
-def analyze(symbol, timeframe, limit):
+@click.option('--real', is_flag=True, help='Использовать реальные данные с биржи')
+def analyze(symbol, timeframe, limit, real):
     """Анализ рынка"""
-    asyncio.run(_analyze_market(symbol, timeframe, limit))
+    asyncio.run(_analyze_market(symbol, timeframe, limit, real))
 
 
 @cli.command()
@@ -34,10 +36,11 @@ def test_connection(exchange):
 
 @cli.command()
 @click.option('--symbol', default='BTCUSDT', help='Торговая пара')
+@click.option('--real', is_flag=True, help='Использовать реальные данные')
 @click.option('--mock', is_flag=True, help='Использовать mock AI')
-def ai_analyze(symbol, mock):
+def ai_analyze(symbol, real, mock):
     """AI анализ рынка"""
-    asyncio.run(_ai_analyze_market(symbol, mock))
+    asyncio.run(_ai_analyze_market(symbol, real, mock))
 
 
 @cli.command()
@@ -52,62 +55,105 @@ def demo():
     asyncio.run(_run_demo())
 
 
+@cli.command()
+@click.option('--symbols', default='BTCUSDT,ETHUSDT,SOLUSDT', help='Список символов через запятую')
+def real_test(symbols):
+    """Тестирование с реальными данными"""
+    symbol_list = [s.strip() for s in symbols.split(',')]
+    asyncio.run(_real_data_test(symbol_list))
+
+
 # Реализация команд
-async def _analyze_market(symbol: str, timeframe: str, limit: int):
-    """Анализ рынка с улучшенной обработкой ошибок"""
+async def _analyze_market(symbol: str, timeframe: str, limit: int, use_real: bool):
+    """Анализ рынка с возможностью использования реальных данных"""
     settings = Settings()
 
     click.echo(f"🔍 Анализ {symbol} на таймфрейме {timeframe}")
 
+    if use_real:
+        click.echo("📡 Режим: Реальные данные с биржи")
+    else:
+        click.echo("🧪 Режим: Тестовые данные")
+
     try:
-        # Попытка использования реального подключения
-        from data.collectors.exchange_collector import ExchangeDataCollector
+        if use_real:
+            # Реальные данные с биржи
+            from core.event_bus import EventBus
+            from core.engine.exchange_manager import ExchangeManager
 
-        collector = ExchangeDataCollector(
-            'bybit',
-            settings.bybit_api_key,
-            settings.bybit_api_secret,
-            settings.bybit_testnet
-        )
+            event_bus = EventBus()
+            await event_bus.start()
 
-        try:
-            # Тест подключения
-            if await collector.test_connection():
-                click.echo("✅ Подключение к бирже успешно")
+            try:
+                exchange_manager = ExchangeManager(settings, event_bus)
+                await exchange_manager.initialize()
 
-                # Получение данных
-                ohlcv_data = await collector.get_ohlcv(symbol, timeframe, limit)
+                exchanges = await exchange_manager.get_connected_exchanges()
+                if exchanges:
+                    click.echo(f"✅ Подключены биржи: {exchanges}")
 
-                if not ohlcv_data.empty:
-                    # Простой технический анализ
-                    current_price = ohlcv_data['close'].iloc[-1]
-                    volume_avg = ohlcv_data['volume'].rolling(20).mean().iloc[-1]
-                    current_volume = ohlcv_data['volume'].iloc[-1]
+                    # Получение реальных данных
+                    ohlcv_data = await exchange_manager.get_market_data(symbol, timeframe, limit)
 
-                    # Результаты анализа
-                    click.echo(f"\n📊 Анализ {symbol}:")
-                    click.echo(f"💰 Текущая цена: ${current_price:,.2f}")
-                    click.echo(f"📊 Объем: {current_volume:,.0f} (ср. {volume_avg:,.0f})")
-                    click.echo(f"🔊 Активность: {'Высокая' if current_volume > volume_avg * 1.5 else 'Обычная'}")
+                    if not ohlcv_data.empty:
+                        # Анализ реальных данных
+                        current_price = ohlcv_data['close'].iloc[-1]
+                        volume_avg = ohlcv_data['volume'].rolling(20).mean().iloc[-1]
+                        current_volume = ohlcv_data['volume'].iloc[-1]
 
-                    # Отображение последних свечей
-                    click.echo(f"\n📈 Последние 5 свечей:")
-                    recent_data = ohlcv_data.tail(5)
-                    for idx, row in recent_data.iterrows():
-                        direction = "🟢" if row['close'] > row['open'] else "🔴"
-                        click.echo(
-                            f"{direction} {idx.strftime('%H:%M')} | O: {row['open']:.2f} H: {row['high']:.2f} L: {row['low']:.2f} C: {row['close']:.2f}")
+                        click.echo(f"\n📊 Реальный анализ {symbol}:")
+                        click.echo(f"💰 Текущая цена: ${current_price:,.2f}")
+                        click.echo(f"📊 Объем: {current_volume:,.0f} (ср. {volume_avg:,.0f})")
+                        click.echo(f"🔊 Активность: {'Высокая' if current_volume > volume_avg * 1.5 else 'Обычная'}")
+
+                        # Технический анализ
+                        from data.processors.technical_processor import TechnicalProcessor
+                        processor = TechnicalProcessor()
+
+                        config = {
+                            'rsi': {'period': 14},
+                            'ema_fast': {'period': 9},
+                            'ema_slow': {'period': 21}
+                        }
+
+                        processed = processor.process_ohlcv(ohlcv_data, config)
+                        current = processed.iloc[-1]
+
+                        if 'rsi' in current and not pd.isna(current['rsi']):
+                            click.echo(f"📈 RSI: {current['rsi']:.2f}")
+
+                        # Отображение последних свечей
+                        click.echo(f"\n📈 Последние 5 свечей:")
+                        recent_data = ohlcv_data.tail(5)
+                        for idx, row in recent_data.iterrows():
+                            direction = "🟢" if row['close'] > row['open'] else "🔴"
+                            click.echo(
+                                f"{direction} {idx.strftime('%H:%M')} | O: {row['open']:.2f} H: {row['high']:.2f} L: {row['low']:.2f} C: {row['close']:.2f}")
+                    else:
+                        click.echo("❌ Не удалось получить реальные данные")
                 else:
-                    click.echo("❌ Не удалось получить данные")
-            else:
-                click.echo("❌ Не удалось подключиться к бирже")
+                    click.echo("⚠️ Нет подключенных бирж. Проверьте API ключи в .env")
 
-        finally:
-            await collector.close()
+                await exchange_manager.stop()
+
+            finally:
+                await event_bus.stop()
+        else:
+            # Тестовые данные
+            from utils.helpers import create_sample_data
+            ohlcv_data = create_sample_data(symbol, periods=limit)
+
+            current_price = ohlcv_data['close'].iloc[-1]
+            volume_avg = ohlcv_data['volume'].rolling(20).mean().iloc[-1]
+            current_volume = ohlcv_data['volume'].iloc[-1]
+
+            click.echo(f"\n📊 Тестовый анализ {symbol}:")
+            click.echo(f"💰 Цена: ${current_price:,.2f}")
+            click.echo(f"📊 Объем: {current_volume:,.0f} (ср. {volume_avg:,.0f})")
 
     except ImportError:
-        click.echo("❌ Модуль exchange_collector не найден")
-        click.echo("💡 Создайте файл из артефакта 'Исправленный Exchange Collector'")
+        click.echo("❌ Модули не найдены")
+        click.echo("💡 Создайте недостающие файлы из артефактов")
     except Exception as e:
         click.echo(f"❌ Ошибка: {e}")
         if logger.level <= 10:  # DEBUG level
@@ -119,81 +165,119 @@ async def _test_exchange_connection(exchange: str):
     settings = Settings()
 
     try:
-        from data.collectors.exchange_collector import ExchangeDataCollector
+        from core.event_bus import EventBus
+        from core.engine.exchange_manager import ExchangeManager
 
-        if exchange.lower() == 'bybit':
-            collector = ExchangeDataCollector(
-                'bybit',
-                settings.bybit_api_key,
-                settings.bybit_api_secret,
-                settings.bybit_testnet
-            )
-        elif exchange.lower() == 'binance':
-            collector = ExchangeDataCollector(
-                'binance',
-                settings.binance_api_key,
-                settings.binance_api_secret,
-                settings.binance_testnet
-            )
-        else:
-            click.echo(f"❌ Неподдерживаемая биржа: {exchange}")
-            return
+        event_bus = EventBus()
+        await event_bus.start()
 
         try:
-            success = await collector.test_connection()
+            exchange_manager = ExchangeManager(settings, event_bus)
+            await exchange_manager.initialize()
 
-            if success:
-                click.echo(f"✅ Подключение к {exchange} успешно!")
+            exchanges = await exchange_manager.get_connected_exchanges()
 
-                # Получение информации о рынках
+            if exchanges:
+                click.echo(f"✅ Подключение успешно!")
+                click.echo(f"🔌 Подключенные биржи: {exchanges}")
+
+                # Тест получения данных
                 try:
-                    ticker = await collector.get_ticker('BTCUSDT')
-                    if ticker and ticker.get('last'):
-                        click.echo(f"📊 BTC/USDT: ${ticker['last']:,.2f}")
+                    data = await exchange_manager.get_market_data("BTCUSDT", "5m", 5)
+                    if not data.empty:
+                        current_price = data['close'].iloc[-1]
+                        click.echo(f"📊 BTC/USDT: ${current_price:,.2f}")
                     else:
-                        click.echo("⚠️ Не удалось получить тикер")
+                        click.echo("⚠️ Не удалось получить тестовые данные")
                 except Exception as e:
-                    click.echo(f"⚠️ Не удалось получить тикер: {e}")
+                    click.echo(f"⚠️ Не удалось получить рыночные данные: {e}")
             else:
-                click.echo(f"❌ Ошибка подключения к {exchange}")
+                click.echo(f"❌ Ошибка подключения к биржам")
                 click.echo("💡 Проверьте API ключи в .env файле")
 
+            await exchange_manager.stop()
+
         finally:
-            await collector.close()
+            await event_bus.stop()
 
     except ImportError:
-        click.echo("❌ Модуль exchange_collector не найден")
-        click.echo("💡 Создайте файл из артефакта 'Исправленный Exchange Collector'")
+        click.echo("❌ Модуль exchange_manager не найден")
+        click.echo("💡 Создайте файл из артефакта 'Исправленный Exchange Manager'")
     except Exception as e:
         click.echo(f"❌ Ошибка: {e}")
 
 
-async def _ai_analyze_market(symbol: str, mock: bool):
+async def _ai_analyze_market(symbol: str, use_real: bool, mock: bool):
     """AI анализ рынка с обработкой ошибок"""
     try:
-        from utils.helpers import create_sample_data
-        from ai.mock_analyzer import MockAIAnalyzer
+        if use_real:
+            click.echo(f"🌐🤖 Реальный AI анализ {symbol}")
 
-        # Создаем тестовые данные
-        ohlcv_data = create_sample_data(symbol, periods=100)
+            # Получение реальных данных
+            settings = Settings()
+            from core.event_bus import EventBus
+            from core.engine.exchange_manager import ExchangeManager
 
-        if mock or True:  # Всегда используем mock пока
+            event_bus = EventBus()
+            await event_bus.start()
+
+            try:
+                exchange_manager = ExchangeManager(settings, event_bus)
+                await exchange_manager.initialize()
+
+                exchanges = await exchange_manager.get_connected_exchanges()
+                if exchanges:
+                    ohlcv_data = await exchange_manager.get_market_data(symbol, "5m", 100)
+
+                    if not ohlcv_data.empty:
+                        current_price = ohlcv_data['close'].iloc[-1]
+                        price_change = (ohlcv_data['close'].iloc[-1] - ohlcv_data['close'].iloc[0]) / \
+                                       ohlcv_data['close'].iloc[0] * 100
+
+                        # AI анализ
+                        if mock:
+                            from ai.mock_analyzer import MockAIAnalyzer
+                            analyzer = MockAIAnalyzer()
+                        else:
+                            from ai.openai_analyzer import OpenAIAnalyzer
+                            analyzer = OpenAIAnalyzer()
+
+                        analysis = await analyzer.analyze_market(ohlcv_data, symbol)
+
+                        # Отображение результатов
+                        click.echo(f"\n🎯 AI Анализ {symbol}:")
+                        click.echo(f"📈 Цена: ${current_price:,.2f}")
+                        click.echo(f"📊 Изменение: {price_change:+.2f}%")
+                        click.echo(f"🤖 Рекомендация: {analysis['action']}")
+                        click.echo(f"💪 Уверенность: {analysis['confidence']:.1%}")
+                        click.echo(f"💭 Обоснование: {analysis['reasoning']}")
+                    else:
+                        click.echo("❌ Не удалось получить реальные данные")
+                else:
+                    click.echo("⚠️ Нет подключений к биржам")
+
+                await exchange_manager.stop()
+
+            finally:
+                await event_bus.stop()
+        else:
+            # Тестовые данные
+            from utils.helpers import create_sample_data
+            from ai.mock_analyzer import MockAIAnalyzer
+
+            ohlcv_data = create_sample_data(symbol, periods=100)
             analyzer = MockAIAnalyzer()
-            click.echo("🤖 Использование Mock AI анализатора")
 
-        click.echo(f"🔍 Анализ {symbol}...")
-        analysis = await analyzer.analyze_market(ohlcv_data, symbol)
+            click.echo(f"🧪🤖 Тестовый AI анализ {symbol}")
+            analysis = await analyzer.analyze_market(ohlcv_data, symbol)
 
-        # Отображение результатов
-        click.echo(f"\n🎯 AI Анализ {symbol}:")
-        click.echo(f"📈 Рекомендация: {analysis['action']}")
-        click.echo(f"💪 Сила сигнала: {analysis['signal_strength']:.2f}")
-        click.echo(f"🎯 Уверенность: {analysis['confidence']:.1%}")
-        click.echo(f"⚠️ Уровень риска: {analysis['risk_level']}")
-        click.echo(f"💭 Обоснование: {analysis['reasoning']}")
-
-        if analysis['action'] != 'HOLD':
-            click.echo(f"💰 Предлагаемая цена входа: ${analysis['suggested_entry']:.2f}")
+            # Отображение результатов
+            click.echo(f"\n🎯 AI Анализ {symbol}:")
+            click.echo(f"📈 Рекомендация: {analysis['action']}")
+            click.echo(f"💪 Сила сигнала: {analysis['signal_strength']:.2f}")
+            click.echo(f"🎯 Уверенность: {analysis['confidence']:.1%}")
+            click.echo(f"⚠️ Уровень риска: {analysis['risk_level']}")
+            click.echo(f"💭 Обоснование: {analysis['reasoning']}")
 
         # Рекомендации по риск-менеджменту
         if analysis['confidence'] > 0.7 and analysis['action'] != 'HOLD':
@@ -208,14 +292,41 @@ async def _ai_analyze_market(symbol: str, mock: bool):
         click.echo(f"❌ Ошибка: {e}")
 
 
+async def _real_data_test(symbols: list):
+    """Комплексное тестирование с реальными данными"""
+    click.echo("🌐 === КОМПЛЕКСНОЕ ТЕСТИРОВАНИЕ С РЕАЛЬНЫМИ ДАННЫМИ ===")
+
+    try:
+        # Импорт функции из main.py
+        from main import run_real_data_test
+
+        # Запуск тестирования
+        results = await run_real_data_test()
+
+        if results:
+            click.echo("\n🎉 === РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ ===")
+            for symbol, result in results.items():
+                click.echo(f"\n📊 {symbol}:")
+                click.echo(f"   💰 Цена: ${result['current_price']:,.2f}")
+                click.echo(f"   📈 Изменение: {result['price_change_24h']:+.2f}%")
+                click.echo(f"   🤖 AI: {result['analysis']['action']}")
+                click.echo(f"   💪 Уверенность: {result['analysis']['confidence']:.1%}")
+        else:
+            click.echo("❌ Тестирование не дало результатов")
+
+    except Exception as e:
+        click.echo(f"❌ Ошибка тестирования: {e}")
+
+
 async def _run_trading_engine():
     """Запуск торгового движка"""
     click.echo("🚀 Запуск торгового движка...")
-    click.echo("⚠️ Phase 0: Только демонстрация, реальная торговля отключена")
+    click.echo("⚠️ Используется testnet режим для безопасности")
 
     try:
-        # Пытаемся запустить демо режим
-        await _run_demo()
+        # Пытаемся запустить полный движок
+        from main import run_bot_mode
+        await run_bot_mode()
     except Exception as e:
         click.echo(f"❌ Ошибка: {e}")
 
@@ -231,7 +342,7 @@ async def _run_demo():
 
     except ImportError:
         click.echo("❌ Модуль main не найден или поврежден")
-        click.echo("💡 Обновите main.py из артефакта 'Исправленный main.py'")
+        click.echo("💡 Обновите main.py из артефакта")
     except Exception as e:
         click.echo(f"❌ Ошибка демо режима: {e}")
 
