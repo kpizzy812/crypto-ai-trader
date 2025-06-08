@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from decimal import Decimal
 from loguru import logger
 from datetime import datetime
+import asyncio
 
 from core.event_bus import EventBus, Event, EventType
 from core.portfolio import Portfolio, Position
@@ -26,6 +27,8 @@ class PositionManager:
         # Подписка на торговые события
         self.event_bus.subscribe(EventType.SIGNAL_GENERATED, self._on_signal_generated)
         self.event_bus.subscribe(EventType.ORDER_FILLED, self._on_order_filled)
+
+        await self.setup_position_monitoring()
 
     async def _on_signal_generated(self, event: Event):
         """Обработка торгового сигнала"""
@@ -278,6 +281,178 @@ class PositionManager:
             await self._close_position(position, reason)
 
         logger.info(f"✅ Закрыто позиций: {len(positions_to_close)}")
+
+    async def emergency_close_all_positions(self, reason: str = "Emergency stop"):
+        """Экстренное закрытие всех позиций"""
+        logger.critical(f"🚨 ЭКСТРЕННОЕ ЗАКРЫТИЕ ВСЕХ ПОЗИЦИЙ: {reason}")
+
+        positions_to_close = list(self.portfolio.positions.values())
+
+        if not positions_to_close:
+            logger.info("✅ Нет открытых позиций для закрытия")
+            return {'status': 'success', 'closed_positions': 0}
+
+        results = {
+            'total_positions': len(positions_to_close),
+            'successfully_closed': 0,
+            'failed_to_close': 0,
+            'errors': []
+        }
+
+        # Закрываем все позиции параллельно
+        close_tasks = []
+        for position in positions_to_close:
+            task = asyncio.create_task(self._emergency_close_single_position(position, reason))
+            close_tasks.append(task)
+
+        # Ждем завершения всех задач
+        close_results = await asyncio.gather(*close_tasks, return_exceptions=True)
+
+        # Анализируем результаты
+        for i, result in enumerate(close_results):
+            if isinstance(result, Exception):
+                results['failed_to_close'] += 1
+                results['errors'].append(str(result))
+                logger.error(f"❌ Ошибка закрытия позиции {positions_to_close[i].id}: {result}")
+            elif result and result.get('success'):
+                results['successfully_closed'] += 1
+                logger.info(f"✅ Позиция {result['position_id']} закрыта")
+            else:
+                results['failed_to_close'] += 1
+                error_msg = result.get('error', 'Unknown error') if result else 'No result'
+                results['errors'].append(error_msg)
+
+        # Публикация события
+        await self.event_bus.publish(Event(
+            type=EventType.EMERGENCY_STOP,
+            data={
+                'reason': reason,
+                'results': results,
+                'timestamp': datetime.utcnow().isoformat()
+            },
+            source="PositionManager"
+        ))
+
+        if results['successfully_closed'] == results['total_positions']:
+            logger.info(f"🎉 Все {results['successfully_closed']} позиций успешно закрыты")
+        else:
+            logger.warning(f"⚠️ Закрыто {results['successfully_closed']} из {results['total_positions']} позиций")
+
+        return results
+
+    async def _emergency_close_single_position(self, position, reason: str):
+        """Экстренное закрытие одной позиции"""
+        position_id = position.id
+
+        try:
+            logger.info(f"🔄 Экстренное закрытие позиции {position_id}")
+
+            # Программное закрытие позиции (эмулируем текущую цену)
+            # В реальной системе здесь должен быть вызов к exchange_manager
+            current_price = position.entry_price * Decimal("1.001")  # +0.1% для примера
+
+            closed_position = await self.portfolio.close_position(position_id, current_price)
+
+            if closed_position:
+                # Публикация события закрытия
+                await self.event_bus.publish(Event(
+                    type=EventType.POSITION_CLOSED,
+                    data={
+                        'position_id': position_id,
+                        'symbol': position.symbol,
+                        'pnl': float(closed_position.pnl),
+                        'pnl_percent': float(closed_position.pnl_percent),
+                        'reason': f"emergency_{reason}",
+                        'duration': str(datetime.utcnow() - position.opened_at),
+                        'entry_price': float(position.entry_price),
+                        'exit_price': float(current_price)
+                    },
+                    source="PositionManager"
+                ))
+
+                # Очистка метаданных
+                if position_id in self.position_trackers:
+                    del self.position_trackers[position_id]
+
+                return {
+                    'success': True,
+                    'position_id': position_id,
+                    'method': 'emergency_programmatic'
+                }
+            else:
+                logger.error(f"❌ Не удалось закрыть позицию {position_id}")
+                return {
+                    'success': False,
+                    'position_id': position_id,
+                    'error': 'Failed to close position programmatically'
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка экстренного закрытия {position_id}: {e}")
+            return {
+                'success': False,
+                'position_id': position_id,
+                'error': str(e)
+            }
+
+    async def force_close_position_by_symbol(self, symbol: str, reason: str = "Manual force close"):
+        """Принудительное закрытие позиции по символу"""
+        try:
+            position = await self._get_position_by_symbol(symbol)
+
+            if not position:
+                logger.warning(f"⚠️ Позиция по символу {symbol} не найдена")
+                return {'success': False, 'error': f'Position for {symbol} not found'}
+
+            logger.warning(f"⚠️ Принудительное закрытие позиции {symbol}: {reason}")
+
+            result = await self._emergency_close_single_position(position, reason)
+
+            if result['success']:
+                logger.info(f"✅ Позиция {symbol} принудительно закрыта")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка принудительного закрытия {symbol}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def get_emergency_status(self):
+        """Получение статуса экстренных операций"""
+        return {
+            'open_positions_count': len(self.portfolio.positions),
+            'positions_by_symbol': {pos.symbol: pos.id for pos in self.portfolio.positions.values()},
+            'emergency_available': True,
+            'last_emergency_time': getattr(self, '_last_emergency_time', None),
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
+    async def setup_position_monitoring(self):
+        """Настройка мониторинга позиций"""
+        # Подписка на дополнительные события
+        self.event_bus.subscribe(EventType.RISK_ALERT, self._on_risk_alert)
+        self.event_bus.subscribe(EventType.SYSTEM_ERROR, self._on_system_error)
+
+    async def _on_risk_alert(self, event: Event):
+        """Обработка риск-алертов"""
+        data = event.data
+        alert_type = data.get('type', '')
+        level = data.get('level', '')
+
+        # При критических алертах закрываем позиции
+        if level == 'CRITICAL' and alert_type in ['CRITICAL_RISK_SCORE', 'MAX_DRAWDOWN_EXCEEDED']:
+            logger.critical(f"🚨 Получен критический риск-алерт: {alert_type}")
+            await self.emergency_close_all_positions(f"Risk alert: {alert_type}")
+
+    async def _on_system_error(self, event: Event):
+        """Обработка системных ошибок"""
+        data = event.data
+        component = data.get('component', '')
+
+        # При критических ошибках exchange_manager закрываем позиции
+        if 'exchange' in component.lower() and data.get('severity') == 'critical':
+            logger.critical(f"🚨 Критическая ошибка в {component}")
+            await self.emergency_close_all_positions(f"System error: {component}")
 
     async def stop(self):
         """Остановка менеджера позиций"""

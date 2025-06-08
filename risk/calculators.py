@@ -3,7 +3,7 @@
 Калькуляторы для риск-менеджмента
 """
 import numpy as np
-from typing import List
+from typing import List, Dict
 from decimal import Decimal
 from loguru import logger
 from config.trading_config import RiskConfig
